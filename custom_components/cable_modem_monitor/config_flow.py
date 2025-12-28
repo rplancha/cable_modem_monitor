@@ -18,6 +18,7 @@ from .const import (
     CONF_DOCSIS_VERSION,
     CONF_HOST,
     CONF_LAST_DETECTION,
+    CONF_LEGACY_SSL,
     CONF_MODEM_CHOICE,
     CONF_PARSER_NAME,
     CONF_PASSWORD,
@@ -152,20 +153,60 @@ async def _connect_to_modem(hass: HomeAssistant, scraper) -> dict[str, Any]:
     return modem_data
 
 
-def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None]:
+def _try_legacy_ssl(url: str, timeout: float) -> tuple[bool, str | None, bool] | None:
+    """Try connecting to URL with legacy SSL ciphers.
+
+    Args:
+        url: HTTPS URL to test
+        timeout: Connection timeout in seconds
+
+    Returns:
+        (True, None, True) if legacy SSL connection succeeds
+        None if legacy SSL also fails (caller should continue trying other options)
+    """
+    import requests
+
+    from .core.ssl_adapter import LegacySSLAdapter
+
+    _LOGGER.warning("Trying %s with legacy SSL ciphers...", url)
+
+    session = requests.Session()
+    session.mount("https://", LegacySSLAdapter())
+
+    try:
+        # Try GET with legacy SSL (some modems don't support HEAD)
+        response = session.get(url, timeout=timeout, verify=False)
+        _LOGGER.warning(
+            "✓ Connectivity check PASSED (legacy SSL): %s returned HTTP %d",
+            url,
+            response.status_code,
+        )
+        return True, None, True  # Legacy SSL needed
+    except Exception as e:
+        _LOGGER.warning("Legacy SSL also failed for %s: %s", url, str(e))
+        return None  # Legacy SSL didn't help
+
+
+def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  # noqa: C901
     """Perform quick HTTP connectivity check to modem (sync version for executor).
+
+    Tries HTTPS first, then HTTP. If HTTPS fails with SSL handshake error,
+    automatically retries with LegacySSLAdapter for older modem firmware.
 
     Args:
         host: Modem IP address or hostname
 
     Returns:
-        tuple of (is_reachable, error_message)
-        - (True, None) if modem responds to HTTP request
-        - (False, error_message) if unreachable with specific reason
+        tuple of (is_reachable, error_message, legacy_ssl_needed)
+        - (True, None, False) if modem responds with modern SSL or HTTP
+        - (True, None, True) if modem required legacy SSL ciphers
+        - (False, error_message, False) if unreachable
     """
     import time
 
     import requests
+
+    from .core.ssl_adapter import is_ssl_handshake_error
 
     # Determine base URL - try HTTPS first like main scraper
     if host.startswith(("http://", "https://")):
@@ -202,7 +243,7 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None]:
             _LOGGER.info(
                 "✓ Connectivity check PASSED: %s returned HTTP %d in %.2fs", test_url, response.status_code, elapsed
             )
-            return True, None
+            return True, None, False  # No legacy SSL needed
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             # BUG FIX (v3.4.0): Some modems (e.g., Netgear C3700 with "PS HTTP Server") reject
             # HTTP HEAD requests with "Connection reset by peer" (ConnectionError).
@@ -233,12 +274,23 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None]:
                     response.status_code,
                     elapsed,
                 )
-                return True, None
+                return True, None, False  # No legacy SSL needed
             except requests.exceptions.Timeout as e2:
                 elapsed = time.time() - start_time
                 msg = f"{protocol} GET request also timed out after {elapsed:.2f}s"
                 _LOGGER.warning("%s: %s - %s", test_url, msg, str(e2))
                 diagnostic_info.append(msg)
+                continue
+            except requests.exceptions.SSLError as e2:
+                elapsed = time.time() - start_time
+                msg = f"{protocol} GET fallback failed after {elapsed:.2f}s: SSLError"
+                _LOGGER.warning("%s: %s - %s", test_url, msg, str(e2))
+                diagnostic_info.append(msg)
+                # Check if this is a handshake error that might work with legacy SSL
+                if test_url.startswith("https://") and is_ssl_handshake_error(e2):
+                    legacy_result = _try_legacy_ssl(test_url, timeout_value)
+                    if legacy_result is not None:
+                        return legacy_result
                 continue
             except Exception as e2:
                 elapsed = time.time() - start_time
@@ -246,6 +298,18 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None]:
                 _LOGGER.warning("%s: %s - %s", test_url, msg, str(e2))
                 diagnostic_info.append(msg)
                 continue
+        except requests.exceptions.SSLError as e:
+            # SSL error on initial HEAD request
+            elapsed = time.time() - start_time
+            msg = f"{protocol} HEAD request SSL error after {elapsed:.2f}s: SSLError"
+            _LOGGER.warning("%s: %s - %s", test_url, msg, str(e))
+            diagnostic_info.append(msg)
+            # Check if this is a handshake error that might work with legacy SSL
+            if test_url.startswith("https://") and is_ssl_handshake_error(e):
+                legacy_result = _try_legacy_ssl(test_url, timeout_value)
+                if legacy_result is not None:
+                    return legacy_result
+            continue
         except Exception as e:
             elapsed = time.time() - start_time
             msg = f"{protocol} request failed after {elapsed:.2f}s: {type(e).__name__}"
@@ -263,7 +327,42 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None]:
         f"(4) If your modem is slow to respond, try submitting again.\n\n"
         f"Diagnostic details: {' | '.join(diagnostic_info)}"
     )
-    return False, error_msg
+    return False, error_msg, False
+
+
+def _detect_legacy_ssl_sync(host: str) -> bool:
+    """Detect if host requires legacy SSL ciphers (sync version for executor).
+
+    Args:
+        host: Modem IP address or hostname
+
+    Returns:
+        True if legacy SSL is needed, False otherwise
+        Returns False for HTTP-only hosts
+    """
+    from .core.ssl_adapter import detect_legacy_ssl_needed
+
+    # Build HTTPS URL
+    if host.startswith("https://"):
+        test_url = host
+    elif host.startswith("http://"):
+        return False  # HTTP, no SSL needed
+    else:
+        test_url = f"https://{host}"
+
+    try:
+        needs_legacy = detect_legacy_ssl_needed(test_url, timeout=3.0)
+        _LOGGER.info(
+            "SSL detection for %s: %s",
+            test_url,
+            "legacy ciphers required" if needs_legacy else "modern SSL works",
+        )
+        return needs_legacy
+    except Exception as e:
+        # If detection fails, default to False (modern SSL)
+        # This handles cases like HTTP-only modems or connection errors
+        _LOGGER.debug("SSL detection failed for %s: %s, defaulting to modern SSL", host, e)
+        return False
 
 
 async def _test_icmp_ping(host: str) -> bool:
@@ -309,12 +408,13 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     # Quick connectivity pre-check (run in executor to avoid blocking)
     # NOTE: Using WARNING level instead of INFO for visibility (HA default log level is WARNING)
     # This helps users and developers debug setup issues without enabling debug logging
+    # This also detects if legacy SSL is needed (for older modem firmware)
     _LOGGER.warning("Performing quick connectivity check to %s", host)
-    is_reachable, error_msg = await hass.async_add_executor_job(_do_quick_connectivity_check, host)
+    is_reachable, error_msg, legacy_ssl = await hass.async_add_executor_job(_do_quick_connectivity_check, host)
     if not is_reachable:
         _LOGGER.error("Quick connectivity check failed: %s", error_msg)
         raise CannotConnectError(error_msg)
-    _LOGGER.warning("Quick connectivity check PASSED for %s", host)
+    _LOGGER.warning("Quick connectivity check PASSED for %s (legacy_ssl=%s)", host, legacy_ssl)
 
     # Get parsers and select appropriate one(s)
     all_parsers = await hass.async_add_executor_job(get_parsers)
@@ -323,7 +423,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     )
 
     # Create scraper
-    _LOGGER.warning("Creating scraper for %s", host)
+    _LOGGER.warning("Creating scraper for %s (legacy_ssl=%s)", host, legacy_ssl)
     scraper = ModemScraper(
         host,
         data.get(CONF_USERNAME),
@@ -332,6 +432,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         cached_url=data.get(CONF_WORKING_URL),
         parser_name=parser_name_hint,
         verify_ssl=VERIFY_SSL,
+        legacy_ssl=legacy_ssl,
     )
 
     # Connect and validate
@@ -359,6 +460,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         "title": title,
         "detection_info": detection_info,
         "supports_icmp": supports_icmp,
+        "legacy_ssl": legacy_ssl,
     }
 
 
@@ -529,6 +631,9 @@ class CableModemMonitorConfigFlow(config_entries.ConfigFlow):
         # Store ICMP support from validation (for health monitoring)
         user_input[CONF_SUPPORTS_ICMP] = info.get("supports_icmp", True)
 
+        # Store legacy SSL setting from validation (for older modem firmware)
+        user_input[CONF_LEGACY_SSL] = info.get("legacy_ssl", False)
+
         # Store detection info from validation
         detection_info = info.get("detection_info", {})
         if detection_info:
@@ -636,6 +741,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Update user input with detection info from validation."""
         # Always update ICMP support - it's re-tested on every validation
         user_input[CONF_SUPPORTS_ICMP] = info.get("supports_icmp", True)
+
+        # Always update legacy SSL - it's re-tested on every validation
+        # This allows detection of firmware updates that change SSL requirements
+        user_input[CONF_LEGACY_SSL] = info.get("legacy_ssl", False)
 
         detection_info = info.get("detection_info", {})
         if detection_info:

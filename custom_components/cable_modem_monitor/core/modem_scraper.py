@@ -75,6 +75,7 @@ class ModemScraper:
         cached_url: str | None = None,
         parser_name: str | None = None,
         verify_ssl: bool = False,
+        legacy_ssl: bool = False,
     ):
         """
         Initialize the modem scraper.
@@ -87,6 +88,7 @@ class ModemScraper:
             cached_url: Previously successful URL (optimization)
             parser_name: Name of cached parser to use (skips auto-detection)
             verify_ssl: Enable SSL certificate verification (default: False for compatibility with self-signed certs)
+            legacy_ssl: Use legacy SSL ciphers (SECLEVEL=0) for older modem firmware
         """
         self.host = host
         # Support both plain IP addresses and full URLs (http:// or https://)
@@ -103,7 +105,15 @@ class ModemScraper:
         self.username = username
         self.password = password
         self.verify_ssl = verify_ssl
+        self.legacy_ssl = legacy_ssl
         self.session = requests.Session()
+
+        # Mount legacy SSL adapter for HTTPS if needed (older modem firmware)
+        if legacy_ssl and self.base_url.startswith("https://"):
+            from .ssl_adapter import LegacySSLAdapter
+
+            self.session.mount("https://", LegacySSLAdapter())
+            _LOGGER.info("Legacy SSL cipher support enabled (SECLEVEL=0) for older modem firmware")
 
         # Configure SSL verification with security warnings
         if not self.verify_ssl:

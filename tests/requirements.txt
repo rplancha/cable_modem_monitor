@@ -5,6 +5,9 @@ pytest-asyncio>=0.23.0
 pytest-cov>=4.1.0
 requests-mock>=1.11.0
 
+# Integration tests (SSL certificate generation)
+cryptography>=41.0.0
+
 # Home Assistant core (minimal version for type checking)
 homeassistant>=2024.1.0
 

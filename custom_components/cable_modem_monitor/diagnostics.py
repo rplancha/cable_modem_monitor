@@ -398,6 +398,10 @@ def _build_diagnostics_dict(hass: HomeAssistant, coordinator, entry: ConfigEntry
             "parser_name": entry.data.get("parser_name", "Unknown"),
             "working_url": entry.data.get("working_url", "Unknown"),
             "last_detection": entry.data.get("last_detection", "Never"),
+            "actual_model": entry.data.get("actual_model", "Unknown"),
+            "docsis_version": entry.data.get("docsis_version", "Unknown"),
+            "supports_icmp": entry.data.get("supports_icmp", False),
+            "legacy_ssl": entry.data.get("legacy_ssl", False),
             "parser_detection": {
                 "user_selected": entry.data.get("modem_choice", "not_set"),
                 "auto_detection_used": entry.data.get("modem_choice", "auto") == "auto",

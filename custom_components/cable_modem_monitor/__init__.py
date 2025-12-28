@@ -22,6 +22,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_DOCSIS_VERSION,
     CONF_HOST,
+    CONF_LEGACY_SSL,
     CONF_MODEM_CHOICE,
     CONF_PARSER_NAME,
     CONF_PASSWORD,
@@ -147,18 +148,34 @@ def _select_parser(parsers: list, modem_choice: str):
     return parsers
 
 
-async def _create_health_monitor(hass: HomeAssistant):
-    """Create health monitor with SSL context."""
+async def _create_health_monitor(hass: HomeAssistant, legacy_ssl: bool = False):
+    """Create health monitor with SSL context.
 
-    def create_ssl_context():
+    Args:
+        hass: Home Assistant instance
+        legacy_ssl: Use legacy SSL ciphers (SECLEVEL=0) for older modem firmware
+    """
+
+    def create_ssl_context(use_legacy: bool):
         """Create SSL context (runs in executor to avoid blocking)."""
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+
+        # Enable legacy ciphers for older modem firmware
+        if use_legacy:
+            context.set_ciphers("DEFAULT:@SECLEVEL=0")
+            _LOGGER.info("Legacy SSL cipher support enabled (SECLEVEL=0) for health monitor")
+
         return context
 
-    ssl_context = await hass.async_add_executor_job(create_ssl_context)
-    return ModemHealthMonitor(max_history=100, verify_ssl=VERIFY_SSL, ssl_context=ssl_context)
+    ssl_context = await hass.async_add_executor_job(create_ssl_context, legacy_ssl)
+    return ModemHealthMonitor(
+        max_history=100,
+        verify_ssl=VERIFY_SSL,
+        ssl_context=ssl_context,
+        legacy_ssl=legacy_ssl,
+    )
 
 
 def _create_update_function(hass: HomeAssistant, scraper, health_monitor, host: str, supports_icmp: bool = True):
@@ -733,6 +750,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         parser_name_hint = entry.data.get(CONF_PARSER_NAME)
 
     # Create scraper
+    legacy_ssl = entry.data.get(CONF_LEGACY_SSL, False)
     scraper = ModemScraper(
         host,
         username,
@@ -741,10 +759,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cached_url=entry.data.get(CONF_WORKING_URL),
         parser_name=parser_name_hint,
         verify_ssl=VERIFY_SSL,
+        legacy_ssl=legacy_ssl,
     )
 
     # Create health monitor
-    health_monitor = await _create_health_monitor(hass)
+    health_monitor = await _create_health_monitor(hass, legacy_ssl=legacy_ssl)
 
     # Get ICMP support setting (auto-detected during setup, re-tested on options change)
     supports_icmp = entry.data.get(CONF_SUPPORTS_ICMP, True)
