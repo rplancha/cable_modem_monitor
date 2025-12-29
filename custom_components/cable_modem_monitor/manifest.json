@@ -3,7 +3,7 @@
   "name": "Cable Modem Monitor",
   "after_dependencies": ["recorder"],
   "codeowners": [
-    "@kwschulz"
+    "@solentlabs"
   ],
   "config_flow": true,
   "documentation": "https://github.com/solentlabs/cable_modem_monitor",
