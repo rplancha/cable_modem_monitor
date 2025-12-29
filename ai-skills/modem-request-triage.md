@@ -279,9 +279,11 @@ captured_from_issue: {issue_number}       # e.g., 63
    | `Spectrum` | `Charter`, `Spectrum (Charter)` |
    | `Cox` | `Cox Communications` |
 
-3. **Firmware version** - Critical for diagnosing regressions. If not visible in capture, ask user or note as `null`.
+3. **Firmware version** - **REQUIRED.** Critical for diagnosing regressions and identifying firmware variants. Same modem model can have completely different HTML across firmware versions. If not visible in capture, ask user before proceeding. Never use `null` - always get the actual version.
 
 4. **Source URL** - Link to official product page for future reference.
+
+5. **Issue linkage** - `captured_from_issue` must reference a real issue number. If a PR is submitted without a linked issue, request one be created first.
 
 ### 4.4 Handle extended/ files
 
@@ -338,6 +340,48 @@ grep -riE "(password|passphrase|wpa|wep|serial|device.?id)" tests/parsers/{mfr}/
 ```bash
 python scripts/generate_fixture_index.py
 ```
+
+### 4.6 Firmware Variants
+
+**Same modem, different firmware = different HTML.** This is common and must be handled.
+
+**When you discover a firmware variant:**
+
+1. **Create variant subfolder:**
+   ```
+   fixtures/{model}/
+   ├── fw_{version_a}/
+   │   ├── status.html
+   │   └── metadata.yaml
+   ├── fw_{version_b}/
+   │   ├── status.html
+   │   └── metadata.yaml
+   └── README.md  # Documents known variants
+   ```
+
+2. **Update metadata.yaml** in each variant folder with its specific firmware version.
+
+3. **Parser must handle both variants:**
+   - Detection should work for all variants
+   - Parsing may need conditional logic based on HTML structure
+   - Add tests for each variant
+
+4. **Document in README.md:**
+   ```markdown
+   ## Known Firmware Variants
+
+   | Firmware | ISP | HTML Structure | Notes |
+   |----------|-----|----------------|-------|
+   | 9.1.103AA72 | Comcast | Table-based | Original |
+   | 10.2.x | Cox | Div-based | Needs different parsing |
+   ```
+
+**Signs of a firmware variant issue:**
+- Parser works for contributor but not for user
+- Same modem model, different behavior
+- Detection passes but parsing returns empty/wrong data
+
+**Never assume one fixture covers all firmware versions.**
 
 ---
 
@@ -663,9 +707,11 @@ If user says "Let me know what you would need" or similar:
   □ Create fixture folder
   □ Copy and scrub files
   □ Create metadata.yaml (use consistent ISP names, look up chipset)
+  □ **firmware_tested is REQUIRED** - never leave as null
   □ Create README.md
   □ Run generate_fixture_index.py
   □ Verify status badge shows correctly (⏳ Awaiting)
+  □ Check for firmware variants if this is a common modem
 
 □ Phase 5: Build Parser
   □ Create parser file
@@ -712,3 +758,45 @@ rm -rf RAW_DATA/{MODEL}/
 ```
 
 RAW_DATA is gitignored and should not be committed. Delete after parser is stable to avoid PII accumulation.
+
+---
+
+## External Contributor PRs
+
+When community members submit PRs for new modem support, apply these requirements:
+
+### Required Before Merge
+
+1. **Linked Issue** - PR must reference an issue number. If submitted without one:
+   > Thanks for this contribution! Before we can review, please open an issue with your modem details so we have a place to track discussion and request additional data if needed.
+
+2. **Firmware Version** - `metadata.yaml` must have `firmware_tested` populated. If missing:
+   > Please add your modem's firmware version to `metadata.yaml`. You can find this on the Product Info page (usually `/swinfo` or similar).
+
+3. **Issue Number in Metadata** - `captured_from_issue` must reference the linked issue.
+
+4. **Adequate Fixtures** - At minimum, the status page(s) used for parsing. Ideally also:
+   - Product info page (for firmware version)
+   - Event log page (for future features)
+
+### Review Checklist for External PRs
+
+```
+□ Linked issue exists with modem details
+□ metadata.yaml has firmware_tested (not null)
+□ metadata.yaml has captured_from_issue
+□ Fixture files are sanitized (no PII)
+□ Parser has tests with reasonable coverage
+□ Parser detection doesn't conflict with similar models
+□ CHANGELOG entry included (or will be added by maintainer)
+```
+
+### Why This Matters
+
+Without linked issues and firmware versions:
+- We can't diagnose issues when the parser breaks for other users
+- We don't know which firmware variant the fixture represents
+- We have no way to contact the contributor for follow-up data
+- Firmware variants look like bugs instead of missing coverage
+
+**PR #22 (SB6190) is a cautionary example** - parser worked for contributor, broke for another user, and we had no firmware version or linked issue to reference.
