@@ -20,8 +20,8 @@ Note: The C3700 is a combo modem/router device, unlike the modem-only CM600.
 Page extensions are .htm instead of .asp.
 
 IP Addressing: Combo modem/routers have two interfaces:
-- 192.168.100.1 (cable modem interface) - Faster, but ICMP ping blocked
-- 192.168.0.1 (router LAN gateway) - Slower, separate auth session
+- 192.168.100.1 (cable modem interface)
+- 192.168.0.1 (router LAN gateway) - separate auth session
 """
 
 from __future__ import annotations

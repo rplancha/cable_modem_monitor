@@ -261,6 +261,12 @@ def _update_device_registry(hass: HomeAssistant, entry: ConfigEntry, host: str) 
     # Use detected_modem for model field (shown in device info)
     actual_model = entry.data.get("actual_model")
     detected_modem = entry.data.get("detected_modem")
+    manufacturer = entry.data.get("detected_manufacturer", "Unknown")
+
+    # Strip manufacturer prefix from model name (e.g., "Motorola MB7621" -> "MB7621")
+    model = actual_model or detected_modem or "Cable Modem Monitor"
+    if model and manufacturer and model.lower().startswith(manufacturer.lower()):
+        model = model[len(manufacturer) :].strip()
 
     device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -270,13 +276,13 @@ def _update_device_registry(hass: HomeAssistant, entry: ConfigEntry, host: str) 
 
     device_registry.async_update_device(
         device.id,
-        manufacturer=entry.data.get("detected_manufacturer", "Unknown"),
-        model=actual_model or detected_modem or "Cable Modem Monitor",
+        manufacturer=manufacturer,
+        model=model,
     )
     _LOGGER.debug(
         "Updated device registry: manufacturer=%s, model=%s",
-        entry.data.get("detected_manufacturer"),
-        actual_model or detected_modem,
+        manufacturer,
+        model,
     )
 
 
