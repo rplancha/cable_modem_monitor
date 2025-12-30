@@ -282,26 +282,38 @@ def protocol_to_badge(protocol: str) -> str:
     """Convert a protocol name to a badge or formatted text.
 
     Args:
-        protocol: Protocol name (e.g., "HTML", "LuCI", "HNAP")
+        protocol: Protocol name (e.g., "HTML", "LuCI", "REST_API", "HNAP")
 
     Returns:
         Markdown badge or formatted text for the protocol
     """
-    # HTML gets official orange badge, LuCI gets OpenWrt cyan, HNAP stays bold black
+    # HTML gets official orange badge, LuCI gets OpenWrt cyan, REST_API gets green, HNAP stays bold black
     if protocol == "HTML":
         return '![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping")'
     if protocol == "LuCI":
         return '![LuCI](https://img.shields.io/badge/-LuCI-00B5E2?style=flat-square "OpenWrt web interface")'
+    if protocol == "REST_API":
+        return '![REST](https://img.shields.io/badge/-REST-5B9A5B?style=flat-square "JSON REST API")'
     if protocol == "HNAP":
-        return "**HNAP**"
+        return '![HNAP](https://img.shields.io/badge/-HNAP-5B8FBF?style=flat-square "SOAP-based, requires auth")'
     return protocol
+
+
+# Alternate patterns that map to canonical CHIPSET_INFO keys
+# Handles variations like "Broadcom 3390S" -> "bcm3390"
+CHIPSET_ALIASES: dict[str, str] = {
+    "3390": "bcm3390",
+    "3384": "bcm3384",
+    "3383": "bcm3383",
+    "3380": "bcm3380",
+}
 
 
 def chipset_to_link(chipset: str) -> str:
     """Convert a chipset name to a linked reference.
 
     Args:
-        chipset: Chipset name (e.g., "Broadcom BCM3390", "Intel Puma 6")
+        chipset: Chipset name (e.g., "Broadcom BCM3390", "Intel Puma 6", "Broadcom 3390S")
 
     Returns:
         Markdown link to chipset reference section, or plain text if unknown
@@ -311,11 +323,18 @@ def chipset_to_link(chipset: str) -> str:
 
     chipset_lower = chipset.lower()
 
-    # Find matching chipset in our reference data
+    # Find matching chipset in our reference data (direct match)
     for key in CHIPSET_INFO:
         if key in chipset_lower:
             display_name, _, _, _, _ = CHIPSET_INFO[key]
             anchor = key.replace(" ", "-")
+            return f"[{display_name}](#{anchor})"
+
+    # Try alias patterns (e.g., "3390" in "Broadcom 3390S")
+    for pattern, canonical_key in CHIPSET_ALIASES.items():
+        if pattern in chipset_lower:
+            display_name, _, _, _, _ = CHIPSET_INFO[canonical_key]
+            anchor = canonical_key.replace(" ", "-")
             return f"[{display_name}](#{anchor})"
 
     # Unknown chipset - return as plain text
@@ -798,7 +817,9 @@ def generate_index(output_path: Path | None = None, update_readmes: bool = True)
             "- **Protocol**: ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square) = web scraping |"
             " ![LuCI](https://img.shields.io/badge/-LuCI-00B5E2?style=flat-square) ="
             " [OpenWrt](https://openwrt.org/docs/guide-user/luci/start) web interface |"
-            " **[HNAP](https://en.wikipedia.org/wiki/Home_Network_Administration_Protocol)** ="
+            " ![REST](https://img.shields.io/badge/-REST-5B9A5B?style=flat-square) = JSON REST API |"
+            " [![HNAP](https://img.shields.io/badge/-HNAP-5B8FBF?style=flat-square)]"
+            "(https://en.wikipedia.org/wiki/Home_Network_Administration_Protocol) ="
             " [SOAP](https://www.w3.org/TR/soap/)-based, requires auth",
             "- **📦**: GPL source code available (firmware uses open source components)",
             "",
