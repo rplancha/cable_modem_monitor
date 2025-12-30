@@ -173,27 +173,12 @@ parsers/
    - Parser handles HTML parsing only
    - Validation is parser-specific
 
-### What Could Be Improved
+### Areas for Improvement
 
-1. **Parser-specific unit tests**
-   - Currently tests focus on integration testing
-   - Individual parser test coverage could be better
-   - Consider adding per-parser test suites
-
-2. **Community HTML samples needed**
-   - Some parsers (TC4400, XB7) lack real-world testing
-   - Need process for accepting sanitized HTML samples
-   - Consider creating fixture contribution guide
-
-3. **Detection collision handling**
-   - Multiple parsers might claim they can parse the same HTML
-   - Priority system helps but isn't perfect
-   - Could add more sophisticated detection logic
-
-4. **Error handling standardization**
-   - Parsers handle errors differently
-   - Could benefit from common error types
-   - Better error messages for troubleshooting
+See **[TECH_DEBT.md](./TECH_DEBT.md)** for tracked improvement items, including:
+- Parser-specific unit test coverage (Item #8)
+- Error handling standardization (Item #9)
+- Detection collision handling (related to Item #4)
 
 ---
 
