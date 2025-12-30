@@ -90,13 +90,13 @@ class TestCM1200Metadata:
         """Test models list is set correctly."""
         assert "CM1200" in NetgearCM1200Parser.models
 
-    def test_parser_awaiting_verification_status(self):
-        """Test parser is awaiting verification."""
+    def test_parser_verified_status(self):
+        """Test parser is verified (confirmed working by user)."""
         from custom_components.cable_modem_monitor.parsers.base_parser import ParserStatus
 
-        assert NetgearCM1200Parser.status == ParserStatus.AWAITING_VERIFICATION
+        assert NetgearCM1200Parser.status == ParserStatus.VERIFIED
         parser = NetgearCM1200Parser()
-        assert parser.verified is False
+        assert parser.verified is True
 
     def test_auth_config(self):
         """Test authentication configuration is set correctly."""
