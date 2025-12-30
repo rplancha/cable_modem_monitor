@@ -318,6 +318,40 @@ Both handle similar authentication flows but with different action prefixes and 
 
 ---
 
+### 14. `__init__.py` File Inconsistency Across Packages
+
+**Problem:** Package `__init__.py` files have inconsistent structure:
+- Parser manufacturer dirs (arris, motorola, etc.) have docstring + `from __future__ import annotations`
+- Some dirs have only a docstring (tests/core, tests/lib, scripts/utils)
+- Some are completely empty (custom_components/, tests/, tests/utils/)
+
+**Impact:**
+- Inconsistent codebase appearance
+- Missing `from __future__ import annotations` may cause issues if type hints are added later
+- No clear standard for contributors to follow
+
+**Remediation:**
+1. Define standard: docstring + `from __future__ import annotations` for all `__init__.py`
+2. Update empty files with minimal docstring describing the package
+3. Add `from __future__` to files that have docstrings but lack it
+
+**Effort:** Trivial
+
+**Files:**
+- `custom_components/__init__.py` (empty)
+- `custom_components/cable_modem_monitor/utils/__init__.py` (empty)
+- `scripts/utils/__init__.py` (missing `from __future__`)
+- `tests/__init__.py` (empty)
+- `tests/components/__init__.py` (empty)
+- `tests/utils/__init__.py` (empty)
+- `tests/core/__init__.py` (missing `from __future__`)
+- `tests/lib/__init__.py` (missing `from __future__`)
+- `tests/integration/__init__.py` (missing `from __future__`)
+- `tests/parsers/universal/__init__.py` (missing `from __future__`)
+- `tests/parsers/virgin/__init__.py` (missing `from __future__`)
+
+---
+
 ## Related Documentation
 
 For feature roadmap and architectural enhancements (not code debt), see:

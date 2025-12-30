@@ -60,6 +60,19 @@ class ModemCapability(str, Enum):
 
     Actions:
         RESTART: Modem can be restarted via the integration
+
+    Future (not yet implemented):
+        PROVISIONED_SPEEDS: ISP-provisioned downstream/upstream bandwidth limits.
+            Available via DOCSIS service flows on many modems (Netgear, Virgin Hub 5, etc.).
+            See: tests/parsers/virgin/fixtures/superhub5/serviceflows.json
+
+        CHANNEL_ATTRIBUTES: Additional per-channel data as extra_state_attributes.
+            Already captured by most parsers but not exposed to sensors:
+            - symbol_rate: Upstream symbol rate (ksym/s) - 11 parsers
+            - modulation: Channel modulation (QAM64, QAM256, etc.) - 15 parsers
+            - lock_status: Channel lock state - 13 parsers
+            Best exposed via extra_state_attributes on existing channel sensors
+            rather than dedicated sensors (avoids entity explosion).
     """
 
     # System information

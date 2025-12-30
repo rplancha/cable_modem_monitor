@@ -221,7 +221,7 @@ class ArrisG54Parser(ModemParser):
                 "power": self._parse_float(ch.get("powerLevel")),
                 "snr": self._parse_float(ch.get("SNRLevel")),
                 "corrected": ch.get("correctableCodewords", 0),
-                "uncorrectables": ch.get("uncorrectableCodewords", 0),
+                "uncorrected": ch.get("uncorrectableCodewords", 0),
                 "is_ofdm": False,
             }
             channels.append(qam_channel)

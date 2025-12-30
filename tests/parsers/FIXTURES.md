@@ -7,7 +7,7 @@ Auto-generated index of modem fixtures.
 - Parser classes - Verified status, manufacturer
 - `README.md` - Model name, contributor notes
 
-**Total Modems:** 17 (11 ✅ verified, 5 ⏳ awaiting, 1 🔧 in progress)
+**Total Modems:** 18 (11 ✅ verified, 6 ⏳ awaiting, 1 🔧 in progress)
 
 ## Fixture Organization Guidelines
 
@@ -44,6 +44,7 @@ All fixture directories should follow this structure:
 | Technicolor | [CGA2121](technicolor/fixtures/cga2121/README.md) | 3.0 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3384](#bcm3384) | ![TELI](https://img.shields.io/badge/-TELI-gray?style=flat-square "Telia") | 1 | ⏳ Awaiting |
 | Technicolor | [TC4400](technicolor/fixtures/tc4400/README.md) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) [![ROG](https://img.shields.io/badge/-ROG-aa6666?style=flat-square "Rogers Communications")](#rogers) [![SHAW](https://img.shields.io/badge/-SHAW-668899?style=flat-square "Shaw Communications")](#shaw) [![VID](https://img.shields.io/badge/-VID-779988?style=flat-square "Vidéotron")](#videotron) ![VODA](https://img.shields.io/badge/-VODA-gray?style=flat-square "Vodafone Germany") ![UNIT](https://img.shields.io/badge/-UNIT-gray?style=flat-square "Unitymedia") | 3 | ✅ Verified |
 | Technicolor | [XB7 / CGM4331COM](technicolor/fixtures/xb7/README.md) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) | 1 | ✅ Verified |
+| Virgin Media | [SUPERHUB5](virgin/fixtures/superhub5/README.md) | 3.1 | REST_API | Broadcom 3390S | ![VIRG](https://img.shields.io/badge/-VIRG-gray?style=flat-square "Virgin Media UK") | 4 | ⏳ Awaiting |
 
 ## Model Timeline
 
@@ -67,6 +68,7 @@ DOCSIS 3.1
 ├── 2020  Motorola    MB8611     ░░░░░░░░░░░░░███████   5yr  Current
 ├── 2020  Arris/CommS S33        ░░░░░░░░░░░░░███████   5yr  Current
 ├── 2020  Technicolor XB7        ░░░░░░░░░░░░░███████   5yr  Current
+├── 2021  Virgin      SUPERHUB5  ░░░░░░░░░░░░░░██████   4yr  Current
 └── 2023  Arris/CommS G54        ░░░░░░░░░░░░░░░░░███   2yr  Current
 
 ```

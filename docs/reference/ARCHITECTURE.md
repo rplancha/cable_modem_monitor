@@ -275,6 +275,21 @@ return {
    - Separate parser releases from integration releases
    - Community-maintained parser repository
 
+6. **Three-part decomposition (post-30 modems milestone)**
+   - **HA Integration (thin)**: config_flow, sensors, device registry - HA-specific wrapper
+   - **Standalone Core (stable)**: scraper, parsing strategies, data models - HA-independent, PyPI-extractable
+   - **Community Configs (high velocity)**: JSON parser configs + fixtures replace Python parsers
+
+   Key shift: parsers become declarative JSON, not Python code. Core provides parsing *strategies* (HTML table extraction, HNAP, REST), community provides *configuration* per modem.
+
+   Enables:
+   - Non-developer contributors can produce complete submissions
+   - AI skill guides fixture → JSON config → test validation
+   - Maintainer review becomes: schema valid? tests pass? → merge
+   - Platform portability (same JSON configs for Python core and browser extension)
+
+   See: `personal/JOURNAL.md` → "2025-12-30: Three-Part Decomposition"
+
 ---
 
 ## Contributing New Parsers
@@ -328,6 +343,6 @@ When creating a new parser, consider:
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** November 2025
+**Document Version:** 1.1
+**Last Updated:** December 2025
 **Maintainer:** Ken Schulz (@kwschulz)
