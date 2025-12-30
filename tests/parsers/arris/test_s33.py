@@ -129,7 +129,7 @@ class TestS33ParserMetadata:
         assert ArrisS33HnapParser.docsis_version == "3.1"
 
     def test_verified_status(self):
-        """Test parser is awaiting verification (not yet verified by user)."""
+        """Test parser is awaiting verification (OFDM channel detection needs testing)."""
         from custom_components.cable_modem_monitor.parsers.base_parser import ParserStatus
 
         assert ArrisS33HnapParser.status == ParserStatus.AWAITING_VERIFICATION

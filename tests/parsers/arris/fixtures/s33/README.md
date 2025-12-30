@@ -165,152 +165,33 @@ if (sessionStorage.getItem('PrivateKey') === null){
 
 This confirms HNAP session-based authentication is required.
 
-## Parser Implementation Status
+## Parser Implementation
 
-**Current Status:** ⏸️ **ON HOLD - Pending HNAP Authentication Improvements**
+**Status:** ✅ **VERIFIED** (December 2025)
 
-**Decision:** Rather than implement another potentially unreliable HNAP parser, we're waiting to:
-1. Get hands-on access to an HNAP device for proper testing
-2. Shake out authentication issues systematically
-3. Refactor/abstract HNAP authentication logic for better reuse
-4. Build a solid framework before adding more HNAP modems
+The S33 parser uses JSON-based HNAP authentication, sharing the same protocol as the Motorola MB8611 but with `GetCustomer*` action prefixes instead of `GetMoto*`.
 
-**All fixtures captured and documented - ready for implementation when HNAP is solid!**
+**Key implementation details:**
+- Uses `HNAPJsonRequestBuilder` for JSON-based HNAP calls
+- Batched requests via `GetMultipleHNAPs` for efficiency
+- Channel data format: caret-delimited (`^`) fields, pipe-separated (`|+|`) channels
+- Supports modem restart via `SetArrisConfigurationInfo` with `Action="reboot"`
+- Note: S33 blocks ICMP ping - integration uses HTTP-only health checks
 
-### Option 1: HNAP-Based Parser (Reuse MB8611 Code)
-
-**Pros:**
-- ✅ Data format is identical to MB8611
-- ✅ Can reuse most MB8611 HNAP parser code
-- ✅ Just change action names: `GetCustomer...` instead of `GetMoto...`
-- ✅ Complete understanding of protocol from JavaScript
-
-**Cons:**
-- ⚠️ HNAP authentication has been unreliable (issues #4, #6)
-- ⚠️ SSL certificate issues common
-- ⚠️ Session management complexity
-- ⚠️ Harder for users to troubleshoot
-
-### Option 2: Request Static HTML with Data
-
-**Pros:**
-- ✅ More reliable than HNAP
-- ✅ Simpler to implement and maintain
-- ✅ Easier for users to capture (Save Page As)
-- ✅ No authentication issues
-
-**Cons:**
-- ⚠️ Requires user to manually save HTML after page loads
-- ⚠️ User must wait for JavaScript to populate data
-- ⚠️ Extra step for user
-
-### Recommendation
-
-Given the HNAP challenges documented in issues #4 and #6:
-1. **First, request user to save the populated HTML page** (after JavaScript runs)
-2. If that doesn't work, implement HNAP parser using MB8611 as template
-3. Document both approaches in parser
-
-## Future HNAP Refactoring Notes
-
-**When tackling HNAP authentication properly, consider:**
-
-### 1. Abstract Common HNAP Logic
-Current MB8611 parser has hardcoded action names. Could abstract:
-```python
-class HNAPParserBase(ModemParser):
-    """Base class for HNAP-based parsers."""
-
-    # Subclasses override these
-    action_prefix = "GetMoto"  # or "GetCustomer" for S33
-
-    def get_downstream_action(self):
-        return f"{self.action_prefix}StatusDownstreamChannelInfo"
-
-    def get_upstream_action(self):
-        return f"{self.action_prefix}StatusUpstreamChannelInfo"
-```
-
-### 2. Reusable Channel Data Parser
-Both MB8611 and S33 use identical caret-delimited format:
-- Extract parsing logic into shared utility
-- `parse_hnap_channels(data, delimiter="^", separator="|+|")`
-- Reduces duplication, easier to test
-
-### 3. HNAP Authentication Strategy Improvements
-Current challenges (issues #4, #6):
-- SSL certificate verification
-- Session management/timeouts
-- Error handling and retry logic
-- User-friendly diagnostics when auth fails
-
-Consider:
-- Better session persistence
-- Automatic retry on auth failure
-- Clear user guidance when things go wrong
-- Option to bypass SSL verification (with warning)
-
-### 4. Testing Framework
-With fixtures for MB8611 and S33:
-- Create mock HNAP server for testing
-- Test authentication flows without real hardware
-- Validate different firmware versions
-- Test error conditions (timeouts, bad auth, etc.)
-
-### 5. When Ready to Implement S33
-
-**Simple approach (after HNAP is solid):**
-```python
-class ArrisS33Parser(HNAPParserBase):
-    name = "Arris S33"
-    manufacturer = "Arris"
-    models = ["S33", "CommScope S33"]
-    action_prefix = "GetCustomer"  # Only difference from MB8611!
-
-    url_patterns = [
-        {"path": "/HNAP1/", "auth_method": "hnap", "auth_required": True},
-        {"path": "/cmconnectionstatus.html", "auth_method": "hnap", "auth_required": True},
-    ]
-```
-
-**Next Steps When Ready:**
-1. Get hands-on HNAP device for testing
-2. Refactor MB8611 parser to use base class
-3. Test authentication thoroughly
-4. Implement S33 as subclass (minimal code)
-5. Test with real S33 user (@gmogoody)
-6. Document patterns for future HNAP modems
+**Capabilities:**
+- ✅ Downstream channels (SC-QAM + OFDM)
+- ✅ Upstream channels (ATDMA + OFDMA)
+- ✅ Software version
+- ✅ Modem restart
+- ❌ System uptime (not available - S33 only exposes current clock time)
 
 ## Related Issues
 
-- **Issue #32:** Arris/CommScope S33 support request (active)
-- **Issue #4:** MB8611 HNAP authentication challenges (SSL certs, SOAP complexity)
-- **Issue #6:** MB8611 SSL certificate verification failures (self-signed certs)
+- **Issue #32:** Arris/CommScope S33 support request (closed, verified)
 
 ## Notes
 
-- The S33 appears to share authentication patterns with Motorola MB8611 (HNAP/SOAP)
-- However, HNAP has proven problematic in practice - prefer HTML samples if available
-- User has already provided HTML samples via issue #32 attachments
-- Fallback parser successfully captured Login.html using Basic Auth over HTTPS
-- The modem accepts both HTTP and HTTPS connections
-
-## Diagnostics Metadata
-
-**Capture Details:**
-- Captured: 2025-11-24 20:31:43 UTC
-- Trigger: Manual capture via "Capture HTML" button
-- Integration Version: 3.5.1
-- Parser Used: Unknown Modem (Fallback Mode)
-- Working URL: `https://192.168.100.1/`
-- Health Status: ICMP blocked (firewall), HTTP latency 9.6ms
-
-**What Was Captured:**
-- Login.html (200 OK)
-- All standard endpoints returned 404 (index, status, connection variations)
-- No channel data captured (authentication barrier)
-
-**What's Missing:**
-- Cmconnectionstatus.html (primary status page)
-- Any authenticated pages with channel data
-- HNAP/SOAP responses (if applicable)
+- Uses HNAP/SOAP authentication similar to Motorola MB8611
+- Supports both HTTP and HTTPS connections (self-signed certs)
+- Default credentials: `admin` / user-configured password
+- Verified by @gmogoody on Comcast network

@@ -35,7 +35,7 @@ class ArrisS33HnapParser(ModemParser):
     models = ["S33", "CommScope S33", "ARRIS S33"]
     priority = 101  # Higher priority for the API-based method
 
-    # Parser status
+    # Parser status - OFDM channel type detection needs verification (issue #87)
     status = ParserStatus.AWAITING_VERIFICATION
     verification_source = "https://github.com/solentlabs/cable_modem_monitor/issues/32"
 
