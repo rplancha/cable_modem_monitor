@@ -740,7 +740,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # User selected specific parser - load only that one (fast path)
         parser_class = await hass.async_add_executor_job(get_parser_by_name, modem_choice)
         if parser_class:
-            _LOGGER.info("Loaded specific parser: %s (skipped full discovery)", modem_choice)
+            _LOGGER.info("Loaded parser: %s", modem_choice)
             selected_parser = parser_class()
             parser_name_hint = None
         else:

@@ -123,9 +123,8 @@ class ModemScraper:
             self.session.verify = False
             # Disable warnings only for this session
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            _LOGGER.info(
-                "SSL certificate verification is disabled for this modem connection. "
-                "This is common for cable modems with self-signed certificates."
+            _LOGGER.debug(
+                "SSL certificate verification disabled (common for cable modems with self-signed certificates)"
             )
         else:
             self.session.verify = True
@@ -517,7 +516,7 @@ class ModemScraper:
         """Get URLs for Tier 1: User explicitly selected a parser."""
         if self.parser is None:
             raise RuntimeError("Tier 1 URLs requested but parser is None")
-        _LOGGER.info("Tier 1: Using explicitly selected parser: %s", self.parser.name)
+        _LOGGER.debug("Tier 1: Using explicitly selected parser: %s", self.parser.name)
         urls = []
         for pattern in self.parser.url_patterns:
             url = f"{self.base_url}{pattern['path']}"
@@ -555,14 +554,14 @@ class ModemScraper:
 
     def _get_tier2_urls(self) -> list[tuple[str, str, type[ModemParser]]]:
         """Get URLs for Tier 2: Cached parser from previous detection."""
-        _LOGGER.info("Tier 2: Looking for cached parser: %s", self.parser_name)
+        _LOGGER.debug("Tier 2: Looking for cached parser: %s", self.parser_name)
         cached_parser = self._find_cached_parser()
         if not cached_parser:
             return []
 
         # Cast to type[ModemParser] to satisfy type checker after None check
         parser = cached_parser
-        _LOGGER.info("Found cached parser: %s", parser.name)
+        _LOGGER.debug("Found cached parser: %s", parser.name)
         urls: list[tuple[str, str, type[ModemParser]]] = []
 
         # Try cached URL first if available
@@ -589,7 +588,7 @@ class ModemScraper:
         Note: Excludes fallback parser (Unknown manufacturer) from URL discovery.
         Fallback parser should only be tried as last resort during detection phases.
         """
-        _LOGGER.info("Tier 3: Auto-detection mode - trying all parsers")
+        _LOGGER.debug("Tier 3: Auto-detection mode - trying all parsers")
         urls = []
 
         # Try cached URL first with any compatible parser (excluding fallback)

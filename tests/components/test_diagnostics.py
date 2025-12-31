@@ -19,6 +19,19 @@ from custom_components.cable_modem_monitor.diagnostics import (
 from custom_components.cable_modem_monitor.utils.html_helper import sanitize_html
 
 
+def _create_mock_hass(data: dict) -> Mock:
+    """Create a mock HomeAssistant with async_add_executor_job support."""
+    hass = Mock(spec=HomeAssistant)
+    hass.data = data
+
+    # Mock async_add_executor_job to run the function synchronously
+    async def mock_executor_job(func, *args):
+        return func(*args)
+
+    hass.async_add_executor_job = mock_executor_job
+    return hass
+
+
 class TestSanitizeHtml:
     """Test HTML sanitization function."""
 
@@ -275,8 +288,7 @@ def mock_coordinator():
 @pytest.mark.asyncio
 async def test_diagnostics_basic_structure(mock_config_entry, mock_coordinator):
     """Test basic diagnostics structure without HTML capture."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
 
@@ -308,8 +320,7 @@ async def test_diagnostics_basic_structure(mock_config_entry, mock_coordinator):
 @pytest.mark.asyncio
 async def test_diagnostics_includes_html_capture_not_expired(mock_config_entry, mock_coordinator):
     """Test diagnostics includes HTML capture when available and not expired."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     # Add HTML capture to coordinator data (not expired)
     future_time = datetime.now() + timedelta(minutes=3)
@@ -354,8 +365,7 @@ async def test_diagnostics_includes_html_capture_not_expired(mock_config_entry, 
 
 @pytest.mark.asyncio
 async def test_diagnostics_includes_multiple_page_capture(mock_config_entry, mock_coordinator):
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     # Add HTML capture with multiple pages (login, status, software info, event log)
     future_time = datetime.now() + timedelta(minutes=3)
@@ -454,8 +464,7 @@ async def test_diagnostics_includes_multiple_page_capture(mock_config_entry, moc
 @pytest.mark.asyncio
 async def test_diagnostics_excludes_expired_html_capture(mock_config_entry, mock_coordinator):
     """Test diagnostics excludes HTML capture when expired."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     # Add HTML capture to coordinator data (expired)
     past_time = datetime.now() - timedelta(minutes=10)
@@ -480,8 +489,7 @@ async def test_diagnostics_excludes_expired_html_capture(mock_config_entry, mock
 @pytest.mark.asyncio
 async def test_diagnostics_without_html_capture(mock_config_entry, mock_coordinator):
     """Test diagnostics works normally when no HTML capture present."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     # Ensure no HTML capture in coordinator data
     assert "_raw_html_capture" not in mock_coordinator.data
@@ -525,8 +533,7 @@ async def test_diagnostics_handles_coordinator_without_data(mock_config_entry, m
     coordinator.last_exception = Exception("Connection failed")
     coordinator.data = None
 
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: coordinator}})
 
     diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
 
@@ -540,8 +547,7 @@ async def test_diagnostics_handles_coordinator_without_data(mock_config_entry, m
 @pytest.mark.asyncio
 async def test_diagnostics_sanitizes_exception_messages(mock_config_entry, mock_coordinator):
     """Test that exception messages are sanitized."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     # Add exception with sensitive data
     mock_coordinator.last_exception = Exception("Failed to connect to 10.0.0.5 with password=secret123")
@@ -559,54 +565,187 @@ async def test_diagnostics_sanitizes_exception_messages(mock_config_entry, mock_
 @pytest.mark.asyncio
 async def test_diagnostics_includes_parser_detection_info(mock_config_entry, mock_coordinator):
     """Test that diagnostics includes parser detection information."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
 
-    # Verify parser_detection section exists
-    assert "config_entry" in diagnostics
-    assert "parser_detection" in diagnostics["config_entry"]
+    # Verify detection section exists (moved from config_entry.parser_detection)
+    assert "detection" in diagnostics
 
-    parser_detection = diagnostics["config_entry"]["parser_detection"]
+    detection = diagnostics["detection"]
 
-    # Verify parser detection fields
-    assert "user_selected" in parser_detection
-    assert "auto_detection_used" in parser_detection
-    assert "detection_method" in parser_detection
-    assert "parser_class" in parser_detection
+    # Verify detection fields
+    assert "user_selection" in detection
+    assert "method" in detection
+    assert "parser" in detection
 
     # Verify values match config entry
-    assert parser_detection["user_selected"] == "Motorola MB8611"
-    assert parser_detection["auto_detection_used"] is False  # User selected specific modem
-    assert parser_detection["detection_method"] == "user_selected"
-    assert parser_detection["parser_class"] == "Motorola MB8611 (Static)"
+    assert detection["user_selection"] == "Motorola MB8611"
+    assert detection["method"] == "user_selected"
+    assert detection["parser"] == "Motorola MB8611 (Static)"
+
+
+# ============================================================================
+# Detection Method Tests - TDD for 3 scenarios
+# ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_diagnostics_parser_detection_auto_mode(mock_config_entry, mock_coordinator):
-    """Test parser detection info when auto mode is used."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+async def test_detection_method_fresh_install_auto(mock_coordinator):
+    """
+    Scenario: Fresh install with auto-detection.
 
-    # Set config entry to auto mode
-    mock_config_entry.data["modem_choice"] = "auto"
+    User selects "auto" → detection succeeds → modem_choice updated to parser name
+    → detection_method stored as "auto_detected"
 
-    diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+    Expected: method = "auto_detected"
+    """
+    entry = Mock(spec=ConfigEntry)
+    entry.entry_id = "test_fresh_auto"
+    entry.title = "Motorola MB7621 (192.168.100.1)"
+    entry.data = {
+        "host": "192.168.100.1",
+        "username": "admin",
+        "password": "secret",
+        # After auto-detection, modem_choice is updated to match parser_name
+        "modem_choice": "Motorola MB7621",
+        "parser_name": "Motorola MB7621",
+        "detected_modem": "Motorola MB7621",
+        "detected_manufacturer": "Motorola",
+        "working_url": "http://192.168.100.1/MotoSwInfo.asp",
+        "last_detection": "2025-12-31T14:24:03.445441",
+        # KEY: This field tracks HOW the parser was selected
+        "detection_method": "auto_detected",
+    }
 
-    parser_detection = diagnostics["config_entry"]["parser_detection"]
+    hass = _create_mock_hass({DOMAIN: {entry.entry_id: mock_coordinator}})
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
-    # Verify auto detection is indicated
-    assert parser_detection["user_selected"] == "auto"
-    assert parser_detection["auto_detection_used"] is True
-    assert parser_detection["detection_method"] == "cached"  # Has parser_name, so cached
+    detection = diagnostics["detection"]
+    assert detection["method"] == "auto_detected"
+    assert detection["user_selection"] == "Motorola MB7621"
+    assert detection["parser"] == "Motorola MB7621"
+
+
+@pytest.mark.asyncio
+async def test_detection_method_explicit_user_selection(mock_coordinator):
+    """
+    Scenario: User explicitly selects a parser from dropdown.
+
+    User picks "Motorola MB7621" from dropdown (not auto)
+    → detection_method stored as "user_selected"
+
+    Expected: method = "user_selected"
+    """
+    entry = Mock(spec=ConfigEntry)
+    entry.entry_id = "test_explicit_select"
+    entry.title = "Motorola MB7621 (192.168.100.1)"
+    entry.data = {
+        "host": "192.168.100.1",
+        "username": "admin",
+        "password": "secret",
+        # User explicitly selected this parser
+        "modem_choice": "Motorola MB7621",
+        "parser_name": "Motorola MB7621",
+        "detected_modem": "Motorola MB7621",
+        "detected_manufacturer": "Motorola",
+        "working_url": "http://192.168.100.1/MotoSwInfo.asp",
+        "last_detection": "2025-12-31T14:24:19.899726",
+        # KEY: User explicitly selected, not auto-detected
+        "detection_method": "user_selected",
+    }
+
+    hass = _create_mock_hass({DOMAIN: {entry.entry_id: mock_coordinator}})
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    detection = diagnostics["detection"]
+    assert detection["method"] == "user_selected"
+    assert detection["user_selection"] == "Motorola MB7621"
+    assert detection["parser"] == "Motorola MB7621"
+
+
+@pytest.mark.asyncio
+async def test_detection_method_resubmit_after_auto(mock_coordinator):
+    """
+    Scenario: Re-submit with explicit selection after previous auto-detection.
+
+    1. Initial: auto-detection found "Motorola MB7621"
+    2. Later: User re-opens config, explicitly selects same parser, saves
+    → detection_method should update to "user_selected"
+
+    Expected: method = "user_selected" (last action was explicit selection)
+    """
+    entry = Mock(spec=ConfigEntry)
+    entry.entry_id = "test_resubmit"
+    entry.title = "Motorola MB7621 (192.168.100.1)"
+    entry.data = {
+        "host": "192.168.100.1",
+        "username": "admin",
+        "password": "secret",
+        # Same parser name as before, but user explicitly re-selected it
+        "modem_choice": "Motorola MB7621",
+        "parser_name": "Motorola MB7621",
+        "detected_modem": "Motorola MB7621",
+        "detected_manufacturer": "Motorola",
+        "working_url": "http://192.168.100.1/MotoSwInfo.asp",
+        # Newer timestamp from re-submit
+        "last_detection": "2025-12-31T14:24:19.899726",
+        # KEY: Even though same parser, user explicitly selected this time
+        "detection_method": "user_selected",
+    }
+
+    hass = _create_mock_hass({DOMAIN: {entry.entry_id: mock_coordinator}})
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    detection = diagnostics["detection"]
+    # This is the critical assertion - re-submit should show user_selected
+    assert detection["method"] == "user_selected"
+
+
+@pytest.mark.asyncio
+async def test_detection_method_legacy_no_field(mock_coordinator):
+    """
+    Scenario: Legacy config entry without detection_method field.
+
+    For backwards compatibility, entries created before this field existed
+    should fall back to inferring from modem_choice vs parser_name.
+
+    Expected: Falls back to inference logic (user_selected if different)
+    """
+    entry = Mock(spec=ConfigEntry)
+    entry.entry_id = "test_legacy"
+    entry.title = "Motorola MB8611 (192.168.100.1)"
+    entry.data = {
+        "host": "192.168.100.1",
+        "username": "admin",
+        "password": "secret",
+        # Different modem_choice vs parser_name (legacy explicit selection)
+        "modem_choice": "Motorola MB8611",
+        "parser_name": "Motorola MB8611 (Static)",
+        "detected_modem": "MB8611",
+        "detected_manufacturer": "Motorola",
+        "working_url": "https://192.168.100.1/MotoConnection.asp",
+        "last_detection": "2025-11-11T10:00:00",
+        # NO detection_method field - legacy entry
+    }
+
+    hass = _create_mock_hass({DOMAIN: {entry.entry_id: mock_coordinator}})
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    detection = diagnostics["detection"]
+    # Fallback: modem_choice != parser_name → user_selected
+    assert detection["method"] == "user_selected"
+
+
+# ============================================================================
+# End Detection Method Tests
+# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_diagnostics_parser_detection_history(mock_config_entry, mock_coordinator):
     """Test parser detection history is included when available."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     # Add parser detection history to coordinator data
     mock_coordinator.data["_parser_detection_history"] = {
@@ -631,8 +770,7 @@ async def test_diagnostics_parser_detection_history(mock_config_entry, mock_coor
 @pytest.mark.asyncio
 async def test_diagnostics_parser_detection_history_not_available(mock_config_entry, mock_coordinator):
     """Test parser detection history shows note when not available."""
-    hass = Mock(spec=HomeAssistant)
-    hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
 
     # Ensure no parser detection history in coordinator data
     assert "_parser_detection_history" not in mock_coordinator.data

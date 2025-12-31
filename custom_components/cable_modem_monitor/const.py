@@ -35,6 +35,7 @@ CONF_LAST_DETECTION = "last_detection"  # Timestamp of last detection
 CONF_SUPPORTS_ICMP = "supports_icmp"  # Auto-detected ICMP ping support for configured host
 CONF_ACTUAL_MODEL = "actual_model"  # Actual model name extracted from modem (e.g., "C3700-100NAS")
 CONF_LEGACY_SSL = "legacy_ssl"  # Auto-detected: True if modem requires SECLEVEL=0 ciphers
+CONF_DETECTION_METHOD = "detection_method"  # How parser was selected: "auto_detected" or "user_selected"
 
 # Polling interval defaults based on industry best practices
 # References:

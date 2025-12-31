@@ -15,6 +15,7 @@ from .const import (
     CONF_ACTUAL_MODEL,
     CONF_DETECTED_MANUFACTURER,
     CONF_DETECTED_MODEM,
+    CONF_DETECTION_METHOD,
     CONF_DOCSIS_VERSION,
     CONF_HOST,
     CONF_LAST_DETECTION,
@@ -168,7 +169,7 @@ def _try_legacy_ssl(url: str, timeout: float) -> tuple[bool, str | None, bool] |
 
     from .core.ssl_adapter import LegacySSLAdapter
 
-    _LOGGER.warning("Trying %s with legacy SSL ciphers...", url)
+    _LOGGER.info("    Trying %s with legacy SSL ciphers...", url)
 
     session = requests.Session()
     session.mount("https://", LegacySSLAdapter())
@@ -176,14 +177,14 @@ def _try_legacy_ssl(url: str, timeout: float) -> tuple[bool, str | None, bool] |
     try:
         # Try GET with legacy SSL (some modems don't support HEAD)
         response = session.get(url, timeout=timeout, verify=False)
-        _LOGGER.warning(
-            "✓ Connectivity check PASSED (legacy SSL): %s returned HTTP %d",
+        _LOGGER.info(
+            "✓ Connected to modem at %s (HTTP %d, legacy SSL)",
             url,
             response.status_code,
         )
         return True, None, True  # Legacy SSL needed
     except Exception as e:
-        _LOGGER.warning("Legacy SSL also failed for %s: %s", url, str(e))
+        _LOGGER.info("    Legacy SSL also failed for %s: %s", url, type(e).__name__)
         return None  # Legacy SSL didn't help
 
 
@@ -219,7 +220,7 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
 
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    _LOGGER.info("Starting connectivity check for %s (trying %d URL(s))", host, len(test_urls))
+    _LOGGER.info("Checking connectivity to %s (trying: %s)...", host, ", ".join(test_urls))
 
     diagnostic_info = []
     # Short timeout for local network devices - modems should respond quickly
@@ -228,7 +229,7 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
 
     for test_url in test_urls:
         protocol = "HTTPS" if test_url.startswith("https://") else "HTTP"
-        _LOGGER.info("Trying %s with HEAD request (timeout=%ds)...", test_url, timeout_value)
+        _LOGGER.info("  Trying %s...", test_url)
         start_time = time.time()
 
         try:
@@ -240,9 +241,7 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
             )  # nosec: cable modem self-signed cert
             elapsed = time.time() - start_time
             # Any response (200, 401, 403, etc.) means modem is reachable
-            _LOGGER.info(
-                "✓ Connectivity check PASSED: %s returned HTTP %d in %.2fs", test_url, response.status_code, elapsed
-            )
+            _LOGGER.info("✓ Connected to modem at %s (HTTP %d, %.2fs)", test_url, response.status_code, elapsed)
             return True, None, False  # No legacy SSL needed
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             # BUG FIX (v3.4.0): Some modems (e.g., Netgear C3700 with "PS HTTP Server") reject
@@ -256,35 +255,35 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
                 msg += f" (timeout={timeout_value}s)"
             else:
                 msg += f": {type(e).__name__}"
-            _LOGGER.warning("%s: %s - %s", test_url, msg, str(e))
+            _LOGGER.info("    %s: %s", test_url, msg)
             diagnostic_info.append(msg)
 
             # Try GET as fallback - some modems don't support HEAD or reject HEAD requests
             # This is critical for modems that return ConnectionError on HEAD requests
-            _LOGGER.warning("Retrying %s with GET request as fallback...", test_url)
+            _LOGGER.info("    Retrying %s with GET...", test_url)
             start_time = time.time()
             try:
                 response = requests.get(
                     test_url, timeout=timeout_value, verify=False, allow_redirects=True
                 )  # nosec: cable modem self-signed cert
                 elapsed = time.time() - start_time
-                _LOGGER.warning(
-                    "✓ Connectivity check PASSED (GET fallback): %s returned HTTP %d in %.2fs",
+                _LOGGER.info(
+                    "✓ Connected to modem at %s (HTTP %d, %.2fs, GET fallback)",
                     test_url,
                     response.status_code,
                     elapsed,
                 )
                 return True, None, False  # No legacy SSL needed
-            except requests.exceptions.Timeout as e2:
+            except requests.exceptions.Timeout:
                 elapsed = time.time() - start_time
-                msg = f"{protocol} GET request also timed out after {elapsed:.2f}s"
-                _LOGGER.warning("%s: %s - %s", test_url, msg, str(e2))
+                msg = f"{protocol} GET also timed out after {elapsed:.2f}s"
+                _LOGGER.info("    %s: %s", test_url, msg)
                 diagnostic_info.append(msg)
                 continue
             except requests.exceptions.SSLError as e2:
                 elapsed = time.time() - start_time
-                msg = f"{protocol} GET fallback failed after {elapsed:.2f}s: SSLError"
-                _LOGGER.warning("%s: %s - %s", test_url, msg, str(e2))
+                msg = f"{protocol} GET failed: SSLError"
+                _LOGGER.info("    %s: %s - trying legacy SSL...", test_url, msg)
                 diagnostic_info.append(msg)
                 # Check if this is a handshake error that might work with legacy SSL
                 if test_url.startswith("https://") and is_ssl_handshake_error(e2):
@@ -294,16 +293,16 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
                 continue
             except Exception as e2:
                 elapsed = time.time() - start_time
-                msg = f"{protocol} GET fallback failed after {elapsed:.2f}s: {type(e2).__name__}"
-                _LOGGER.warning("%s: %s - %s", test_url, msg, str(e2))
+                msg = f"{protocol} GET failed after {elapsed:.2f}s: {type(e2).__name__}"
+                _LOGGER.info("    %s: %s", test_url, msg)
                 diagnostic_info.append(msg)
                 continue
         except requests.exceptions.SSLError as e:
             # SSL error on initial HEAD request
             elapsed = time.time() - start_time
-            msg = f"{protocol} HEAD request SSL error after {elapsed:.2f}s: SSLError"
-            _LOGGER.warning("%s: %s - %s", test_url, msg, str(e))
-            diagnostic_info.append(msg)
+            msg = f"{protocol} SSL error - trying legacy SSL..."
+            _LOGGER.info("    %s: %s", test_url, msg)
+            diagnostic_info.append(f"{protocol} HEAD SSL error")
             # Check if this is a handshake error that might work with legacy SSL
             if test_url.startswith("https://") and is_ssl_handshake_error(e):
                 legacy_result = _try_legacy_ssl(test_url, timeout_value)
@@ -312,8 +311,8 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
             continue
         except Exception as e:
             elapsed = time.time() - start_time
-            msg = f"{protocol} request failed after {elapsed:.2f}s: {type(e).__name__}"
-            _LOGGER.warning("%s: %s - %s", test_url, msg, str(e))
+            msg = f"{protocol} failed after {elapsed:.2f}s: {type(e).__name__}"
+            _LOGGER.info("    %s: %s", test_url, msg)
             diagnostic_info.append(msg)
             continue
 
@@ -406,15 +405,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     _validate_host_format(host)
 
     # Quick connectivity pre-check (run in executor to avoid blocking)
-    # NOTE: Using WARNING level instead of INFO for visibility (HA default log level is WARNING)
-    # This helps users and developers debug setup issues without enabling debug logging
     # This also detects if legacy SSL is needed (for older modem firmware)
-    _LOGGER.warning("Performing quick connectivity check to %s", host)
     is_reachable, error_msg, legacy_ssl = await hass.async_add_executor_job(_do_quick_connectivity_check, host)
     if not is_reachable:
-        _LOGGER.error("Quick connectivity check failed: %s", error_msg)
+        _LOGGER.error("Connectivity check failed for %s: %s", host, error_msg)
         raise CannotConnectError(error_msg)
-    _LOGGER.warning("Quick connectivity check PASSED for %s (legacy_ssl=%s)", host, legacy_ssl)
 
     # Get parsers and select appropriate one(s)
     all_parsers = await hass.async_add_executor_job(get_parsers)
@@ -423,7 +418,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     )
 
     # Create scraper
-    _LOGGER.warning("Creating scraper for %s (legacy_ssl=%s)", host, legacy_ssl)
+    _LOGGER.debug("Creating scraper for %s (legacy_ssl=%s)", host, legacy_ssl)
     scraper = ModemScraper(
         host,
         data.get(CONF_USERNAME),
@@ -436,7 +431,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     )
 
     # Connect and validate
-    _LOGGER.warning("Attempting to connect to modem at %s", host)
+    _LOGGER.info("Detecting modem at %s...", host)
     modem_data = await _connect_to_modem(hass, scraper)
 
     # Get detection info and create title
@@ -447,9 +442,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         actual_model = scraper.parser.get_actual_model(modem_data)
         if actual_model:
             detection_info["actual_model"] = actual_model
-            _LOGGER.info("Actual model extracted from modem: %s", actual_model)
+            _LOGGER.debug("Actual model extracted from modem: %s", actual_model)
 
-    _LOGGER.warning("Detection successful: %s", detection_info)
+    _LOGGER.info("✓ Detected %s at %s", detection_info.get("modem_name", "modem"), host)
     title = _create_title(detection_info, host)
 
     # Test ICMP ping support AFTER discovery succeeds (for health monitoring)
@@ -651,12 +646,17 @@ class CableModemMonitorConfigFlow(config_entries.ConfigFlow):
             if detection_info.get("actual_model"):
                 user_input[CONF_ACTUAL_MODEL] = detection_info["actual_model"]
 
+            # Track how the parser was selected (before updating modem_choice)
+            original_choice = user_input.get(CONF_MODEM_CHOICE)
+
             # If user selected "auto", update the choice to show what was detected
-            if user_input.get(CONF_MODEM_CHOICE) == "auto" and detected_modem_name:
-                _LOGGER.warning(
-                    "Auto-detection successful: updating modem_choice from 'auto' to '%s'", detected_modem_name
-                )
+            if original_choice == "auto" and detected_modem_name:
+                _LOGGER.info("Auto-detection successful: detected '%s'", detected_modem_name)
                 user_input[CONF_MODEM_CHOICE] = detected_modem_name
+                user_input[CONF_DETECTION_METHOD] = "auto_detected"
+            else:
+                # User explicitly selected a parser from dropdown
+                user_input[CONF_DETECTION_METHOD] = "user_selected"
 
         return self.async_create_entry(title=info["title"], data=user_input)
 
@@ -762,13 +762,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if detection_info.get("actual_model"):
                 user_input[CONF_ACTUAL_MODEL] = detection_info["actual_model"]
 
+            # Track how the parser was selected (before updating modem_choice)
+            original_choice = user_input.get(CONF_MODEM_CHOICE)
+
             # If user selected "auto", update choice to show what was detected
-            if user_input.get(CONF_MODEM_CHOICE) == "auto" and detected_modem_name:
+            if original_choice == "auto" and detected_modem_name:
                 _LOGGER.info(
                     "Auto-detection successful in options flow: updating modem_choice from 'auto' to '%s'",
                     detected_modem_name,
                 )
                 user_input[CONF_MODEM_CHOICE] = detected_modem_name
+                user_input[CONF_DETECTION_METHOD] = "auto_detected"
+            else:
+                # User explicitly selected a parser from dropdown
+                user_input[CONF_DETECTION_METHOD] = "user_selected"
         else:
             # Preserve existing detection info if validation didn't return new info
             user_input[CONF_PARSER_NAME] = self.config_entry.data.get(CONF_PARSER_NAME)
@@ -778,6 +785,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             user_input[CONF_WORKING_URL] = self.config_entry.data.get(CONF_WORKING_URL)
             user_input[CONF_LAST_DETECTION] = self.config_entry.data.get(CONF_LAST_DETECTION)
             user_input[CONF_ACTUAL_MODEL] = self.config_entry.data.get(CONF_ACTUAL_MODEL)
+            user_input[CONF_DETECTION_METHOD] = self.config_entry.data.get(CONF_DETECTION_METHOD)
 
     def _create_config_message(self, user_input: dict[str, Any]) -> str:
         """Create configuration message from detected modem info."""

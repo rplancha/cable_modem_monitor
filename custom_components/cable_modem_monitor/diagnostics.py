@@ -7,7 +7,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -280,6 +280,34 @@ def _get_recent_logs(hass: HomeAssistant, max_records: int = 150) -> list[dict[s
     ]
 
 
+def _get_auth_method(coordinator) -> str:
+    """Get the authentication method from the parser.
+
+    Args:
+        coordinator: DataUpdateCoordinator with scraper reference
+
+    Returns:
+        Auth method: "form", "basic", "hnap", "none", or "unknown"
+    """
+    try:
+        scraper = getattr(coordinator, "scraper", None)
+        if not scraper:
+            return "unknown"
+
+        parser = getattr(scraper, "parser", None)
+        if not parser:
+            return "unknown"
+
+        # Get auth method from parser's url_patterns
+        url_patterns = getattr(parser, "url_patterns", [])
+        if url_patterns:
+            return str(url_patterns[0].get("auth_method", "none"))
+
+        return "none"
+    except Exception:
+        return "unknown"
+
+
 def _get_detection_method(entry: ConfigEntry) -> str:
     """Determine how parser was detected.
 
@@ -287,17 +315,26 @@ def _get_detection_method(entry: ConfigEntry) -> str:
         entry: Config entry to analyze
 
     Returns:
-        Detection method: "user_selected", "cached", or "auto_detected"
+        Detection method: "user_selected" or "auto_detected"
     """
-    modem_choice = entry.data.get("modem_choice", "auto")
-    cached_parser = entry.data.get("parser_name")
+    # Prefer explicit detection_method if stored (new entries)
+    stored_method = entry.data.get("detection_method")
+    if stored_method in ("auto_detected", "user_selected"):
+        return str(stored_method)
 
-    if modem_choice != "auto":
-        return "user_selected"
-    elif cached_parser:
-        return "cached"
-    else:
+    # Fallback for legacy entries without detection_method field:
+    # Infer from whether modem_choice matches parser_name
+    modem_choice = entry.data.get("modem_choice", "auto")
+    parser_name = entry.data.get("parser_name")
+    last_detection = entry.data.get("last_detection")
+
+    # If modem_choice matches parser_name and we have a detection timestamp,
+    # auto-detection ran and cached the result
+    if modem_choice == parser_name and last_detection:
         return "auto_detected"
+    else:
+        # User explicitly selected a specific parser from dropdown
+        return "user_selected"
 
 
 def _get_hnap_auth_attempt(coordinator) -> dict[str, Any]:
@@ -392,22 +429,20 @@ def _build_diagnostics_dict(hass: HomeAssistant, coordinator, entry: ConfigEntry
             "title": entry.title,
             "host": entry.data.get("host"),
             "has_credentials": bool(entry.data.get("username") and entry.data.get("password")),
-            "modem_choice": entry.data.get("modem_choice", "not_set"),
-            "detected_modem": entry.data.get("detected_modem", "Unknown"),
-            "detected_manufacturer": entry.data.get("detected_manufacturer", "Unknown"),
-            "parser_name": entry.data.get("parser_name", "Unknown"),
-            "working_url": entry.data.get("working_url", "Unknown"),
-            "last_detection": entry.data.get("last_detection", "Never"),
-            "actual_model": entry.data.get("actual_model", "Unknown"),
-            "docsis_version": entry.data.get("docsis_version", "Unknown"),
             "supports_icmp": entry.data.get("supports_icmp", False),
+        },
+        "detection": {
+            "method": _get_detection_method(entry),
+            "user_selection": entry.data.get("modem_choice", "auto"),
+            "parser": entry.data.get("parser_name", "Unknown"),
+            "manufacturer": entry.data.get("detected_manufacturer", "Unknown"),
+            "model": entry.data.get("detected_modem", "Unknown"),
+            "docsis_version": entry.data.get("docsis_version", "Unknown"),
+            "working_url": entry.data.get("working_url", "Unknown"),
+            "protocol": "https" if entry.data.get("working_url", "").startswith("https") else "http",
+            "auth_method": _get_auth_method(coordinator),
             "legacy_ssl": entry.data.get("legacy_ssl", False),
-            "parser_detection": {
-                "user_selected": entry.data.get("modem_choice", "not_set"),
-                "auto_detection_used": entry.data.get("modem_choice", "auto") == "auto",
-                "detection_method": _get_detection_method(entry),
-                "parser_class": entry.data.get("parser_name", "Unknown"),
-            },
+            "last_detection": entry.data.get("last_detection", "Never"),
         },
         "coordinator": {
             "last_update_success": coordinator.last_update_success,
@@ -422,7 +457,6 @@ def _build_diagnostics_dict(hass: HomeAssistant, coordinator, entry: ConfigEntry
             "total_corrected_errors": data.get("cable_modem_total_corrected", 0),
             "total_uncorrected_errors": data.get("cable_modem_total_uncorrected", 0),
             "software_version": data.get("cable_modem_software_version", "Unknown"),
-            "model_name": data.get("cable_modem_model_name"),
             "system_uptime": data.get("cable_modem_system_uptime", "Unknown"),
             "health_status": data.get("health_status", "not_available"),
             "health_diagnosis": data.get("health_diagnosis", ""),
@@ -551,4 +585,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
             },
         }
 
-    return _build_diagnostics_dict(hass, coordinator, entry)
+    # Run diagnostics building in executor to avoid blocking I/O in event loop
+    # (_get_recent_logs reads from log file which is blocking)
+    return cast(
+        dict[str, Any],
+        await hass.async_add_executor_job(_build_diagnostics_dict, hass, coordinator, entry),
+    )
