@@ -10,6 +10,8 @@ body:
 
         Thank you for helping expand modem support! This template will guide you through providing the information needed to add support for your modem.
 
+        **New here?** Read [Improving the Modem Request Process](https://github.com/solentlabs/cable_modem_monitor/discussions/88) to understand what makes a complete submission.
+
         **The easiest way:** Install the integration with your modem's IP address. Even if your modem isn't supported, it will enter **Fallback Mode** which lets you capture data safely.
 
   - type: input
