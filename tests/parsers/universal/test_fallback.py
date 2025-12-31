@@ -204,7 +204,7 @@ class TestLogin:
         assert success is True
         assert html is None
 
-    @patch("custom_components.cable_modem_monitor.core.authentication.AuthFactory")
+    @patch("custom_components.cable_modem_monitor.core.auth.AuthFactory")
     def test_returns_true_when_auth_raises_exception(self, mock_auth_factory):
         """Test that login returns True even if authentication raises exception."""
         parser = UniversalFallbackParser()
@@ -251,6 +251,6 @@ class TestParserConfiguration:
 
     def test_uses_basic_auth_config(self):
         """Test that parser uses BasicAuthConfig."""
-        from custom_components.cable_modem_monitor.core.authentication import AuthStrategyType
+        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType
 
         assert UniversalFallbackParser.auth_config.strategy == AuthStrategyType.BASIC_HTTP

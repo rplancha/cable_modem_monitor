@@ -13,8 +13,7 @@ import logging
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth_config import BasicAuthConfig
-from custom_components.cable_modem_monitor.core.authentication import AuthFactory, AuthStrategyType
+from custom_components.cable_modem_monitor.core.auth import AuthFactory, AuthStrategyType, BasicAuthConfig
 from custom_components.cable_modem_monitor.lib.html_crawler import generate_seed_urls
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus

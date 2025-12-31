@@ -100,7 +100,7 @@ class TestCM1200Metadata:
 
     def test_auth_config(self):
         """Test authentication configuration is set correctly."""
-        from custom_components.cable_modem_monitor.core.auth_config import AuthStrategyType
+        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType
 
         assert NetgearCM1200Parser.auth_config.strategy == AuthStrategyType.BASIC_HTTP
 

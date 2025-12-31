@@ -7,11 +7,18 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from custom_components.cable_modem_monitor.core.auth_config import AuthStrategyType, FormAuthConfig
-from custom_components.cable_modem_monitor.core.authentication import (
+from custom_components.cable_modem_monitor.core.auth import (
+    AuthStrategyType,
     BasicHttpAuthStrategy,
+    FormAuthConfig,
+    FormBase64AuthStrategy,
+    FormPlainAndBase64AuthStrategy,
     FormPlainAuthStrategy,
+    HNAPAuthConfig,
+    HNAPSessionAuthStrategy,
     NoAuthStrategy,
+    RedirectFormAuthConfig,
+    RedirectFormAuthStrategy,
 )
 
 
@@ -175,6 +182,507 @@ class TestFormPlainAuthStrategy:
         assert success is True
 
 
+class TestFormBase64AuthStrategy:
+    """Test FormBase64AuthStrategy."""
+
+    @pytest.fixture
+    def form_base64_config(self):
+        """Create a form auth configuration for Base64."""
+        return FormAuthConfig(
+            strategy=AuthStrategyType.FORM_BASE64,
+            login_url="/login.asp",
+            username_field="username",
+            password_field="password",
+            success_indicator="/status.asp",
+        )
+
+    def test_form_base64_encodes_password(self, mock_session, form_base64_config):
+        """Test that Base64 auth encodes the password."""
+        import base64
+
+        strategy = FormBase64AuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.url = "http://192.168.1.1/status.asp"
+        mock_response.text = "<html>Logged in</html>"
+        mock_response.status_code = 200
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", form_base64_config)
+
+        assert success is True
+        assert response is not None
+
+        # Verify password was Base64 encoded
+        call_args = mock_session.post.call_args
+        sent_password = call_args[1]["data"]["password"]
+        expected_encoded = base64.b64encode(b"password").decode("utf-8")
+        assert sent_password == expected_encoded
+
+    def test_form_base64_without_credentials(self, mock_session, form_base64_config):
+        """Test Base64 auth without credentials skips login."""
+        strategy = FormBase64AuthStrategy()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", None, None, form_base64_config)
+
+        assert success is True
+        assert response is None
+        mock_session.post.assert_not_called()
+
+    def test_form_base64_wrong_config_type(self, mock_session):
+        """Test Base64 auth with wrong config type."""
+        strategy = FormBase64AuthStrategy()
+        wrong_config = MagicMock()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", wrong_config)
+
+        assert success is False
+        assert response is None
+
+    def test_form_base64_success_indicator_in_url(self, mock_session, form_base64_config):
+        """Test success detection via URL pattern."""
+        strategy = FormBase64AuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.url = "http://192.168.1.1/status.asp?logged=true"
+        mock_response.text = "<html>Status</html>"
+        mock_response.status_code = 200
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", form_base64_config)
+
+        assert success is True
+
+    def test_form_base64_success_indicator_by_size(self, mock_session):
+        """Test success detection via response size."""
+        config = FormAuthConfig(
+            strategy=AuthStrategyType.FORM_BASE64,
+            login_url="/login.asp",
+            username_field="username",
+            password_field="password",
+            success_indicator="500",  # Response must be > 500 bytes
+        )
+        strategy = FormBase64AuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.url = "http://192.168.1.1/other.asp"
+        mock_response.text = "x" * 600
+        mock_response.status_code = 200
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", config)
+
+        assert success is True
+
+    def test_form_base64_no_success_indicator(self, mock_session):
+        """Test success detection via status code when no indicator."""
+        config = FormAuthConfig(
+            strategy=AuthStrategyType.FORM_BASE64,
+            login_url="/login.asp",
+            username_field="username",
+            password_field="password",
+            success_indicator=None,
+        )
+        strategy = FormBase64AuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.url = "http://192.168.1.1/other.asp"
+        mock_response.text = "<html>OK</html>"
+        mock_response.status_code = 200
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", config)
+
+        assert success is True
+
+
+class TestFormPlainAndBase64AuthStrategy:
+    """Test FormPlainAndBase64AuthStrategy (fallback strategy)."""
+
+    @pytest.fixture
+    def form_fallback_config(self):
+        """Create a form auth configuration for fallback."""
+        return FormAuthConfig(
+            strategy=AuthStrategyType.FORM_PLAIN_AND_BASE64,
+            login_url="/login.asp",
+            username_field="username",
+            password_field="password",
+            success_indicator="/status.asp",
+        )
+
+    def test_fallback_tries_plain_first(self, mock_session, form_fallback_config):
+        """Test that fallback tries plain password first."""
+        strategy = FormPlainAndBase64AuthStrategy()
+
+        # First call (plain) succeeds
+        mock_response = MagicMock()
+        mock_response.url = "http://192.168.1.1/status.asp"
+        mock_response.text = "<html>Logged in</html>"
+        mock_response.status_code = 200
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", form_fallback_config
+        )
+
+        assert success is True
+        # Should only call once (plain worked)
+        assert mock_session.post.call_count == 1
+        # Verify plain password was sent
+        call_args = mock_session.post.call_args
+        assert call_args[1]["data"]["password"] == "password"
+
+    def test_fallback_tries_base64_on_plain_failure(self, mock_session, form_fallback_config):
+        """Test that fallback tries Base64 when plain fails."""
+        import base64
+
+        strategy = FormPlainAndBase64AuthStrategy()
+
+        # First call (plain) fails, second (base64) succeeds
+        mock_fail_response = MagicMock()
+        mock_fail_response.url = "http://192.168.1.1/login.asp"  # Still on login page
+        mock_fail_response.text = "Login failed"
+        mock_fail_response.status_code = 200
+
+        mock_success_response = MagicMock()
+        mock_success_response.url = "http://192.168.1.1/status.asp"
+        mock_success_response.text = "<html>Logged in</html>"
+        mock_success_response.status_code = 200
+
+        mock_session.post.side_effect = [mock_fail_response, mock_success_response]
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", form_fallback_config
+        )
+
+        assert success is True
+        assert mock_session.post.call_count == 2
+
+        # Verify second call used Base64
+        second_call = mock_session.post.call_args_list[1]
+        expected_encoded = base64.b64encode(b"password").decode("utf-8")
+        assert second_call[1]["data"]["password"] == expected_encoded
+
+    def test_fallback_fails_when_both_fail(self, mock_session, form_fallback_config):
+        """Test that fallback fails when both methods fail."""
+        strategy = FormPlainAndBase64AuthStrategy()
+
+        mock_fail_response = MagicMock()
+        mock_fail_response.url = "http://192.168.1.1/login.asp"
+        mock_fail_response.text = "Login failed"
+        mock_fail_response.status_code = 200
+        mock_session.post.return_value = mock_fail_response
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", form_fallback_config
+        )
+
+        assert success is False
+        assert mock_session.post.call_count == 2
+
+    def test_fallback_without_credentials(self, mock_session, form_fallback_config):
+        """Test fallback without credentials skips login."""
+        strategy = FormPlainAndBase64AuthStrategy()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", None, None, form_fallback_config)
+
+        assert success is True
+        assert response is None
+        mock_session.post.assert_not_called()
+
+    def test_fallback_wrong_config_type(self, mock_session):
+        """Test fallback with wrong config type."""
+        strategy = FormPlainAndBase64AuthStrategy()
+        wrong_config = MagicMock()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", wrong_config)
+
+        assert success is False
+        assert response is None
+
+
+class TestRedirectFormAuthStrategy:
+    """Test RedirectFormAuthStrategy."""
+
+    @pytest.fixture
+    def redirect_form_config(self):
+        """Create a redirect form auth configuration."""
+        return RedirectFormAuthConfig(
+            strategy=AuthStrategyType.REDIRECT_FORM,
+            login_url="/check.jst",
+            username_field="username",
+            password_field="password",
+            success_redirect_pattern="/home.jst",
+            authenticated_page_url="/network_setup.jst",
+        )
+
+    def test_redirect_form_success(self, mock_session, redirect_form_config):
+        """Test successful redirect form authentication."""
+        strategy = RedirectFormAuthStrategy()
+
+        # Mock login POST response
+        mock_login_response = MagicMock()
+        mock_login_response.url = "http://192.168.1.1/home.jst"
+        mock_login_response.status_code = 200
+        mock_login_response.text = "<html>Home</html>"
+
+        # Mock authenticated page GET response
+        mock_auth_response = MagicMock()
+        mock_auth_response.status_code = 200
+        mock_auth_response.text = "<html>Network Setup</html>"
+
+        mock_session.post.return_value = mock_login_response
+        mock_session.get.return_value = mock_auth_response
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", redirect_form_config
+        )
+
+        assert success is True
+        assert response == "<html>Network Setup</html>"
+        mock_session.post.assert_called_once()
+        mock_session.get.assert_called_once()
+
+    def test_redirect_form_without_credentials(self, mock_session, redirect_form_config):
+        """Test redirect form requires credentials."""
+        strategy = RedirectFormAuthStrategy()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", None, None, redirect_form_config)
+
+        assert success is False
+        assert response is None
+        mock_session.post.assert_not_called()
+
+    def test_redirect_form_wrong_config_type(self, mock_session):
+        """Test redirect form with wrong config type."""
+        strategy = RedirectFormAuthStrategy()
+        wrong_config = MagicMock()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", wrong_config)
+
+        assert success is False
+        assert response is None
+
+    def test_redirect_form_login_http_error(self, mock_session, redirect_form_config):
+        """Test redirect form handles HTTP error."""
+        strategy = RedirectFormAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", redirect_form_config
+        )
+
+        assert success is False
+
+    def test_redirect_form_wrong_redirect(self, mock_session, redirect_form_config):
+        """Test redirect form fails on wrong redirect."""
+        strategy = RedirectFormAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.url = "http://192.168.1.1/login.jst"  # Wrong redirect
+        mock_response.status_code = 200
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", redirect_form_config
+        )
+
+        assert success is False
+
+    def test_redirect_form_cross_host_security(self, mock_session, redirect_form_config):
+        """Test redirect form rejects cross-host redirects."""
+        strategy = RedirectFormAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.url = "http://malicious.com/home.jst"  # Different host!
+        mock_response.status_code = 200
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", redirect_form_config
+        )
+
+        assert success is False
+
+    def test_redirect_form_timeout_handling(self, mock_session, redirect_form_config):
+        """Test redirect form handles timeout."""
+        strategy = RedirectFormAuthStrategy()
+
+        mock_session.post.side_effect = requests.exceptions.Timeout("Connection timed out")
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", redirect_form_config
+        )
+
+        assert success is False
+
+    def test_redirect_form_connection_error(self, mock_session, redirect_form_config):
+        """Test redirect form handles connection error."""
+        strategy = RedirectFormAuthStrategy()
+
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("Connection failed")
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", redirect_form_config
+        )
+
+        assert success is False
+
+    def test_redirect_form_authenticated_page_error(self, mock_session, redirect_form_config):
+        """Test redirect form handles authenticated page fetch failure."""
+        strategy = RedirectFormAuthStrategy()
+
+        mock_login_response = MagicMock()
+        mock_login_response.url = "http://192.168.1.1/home.jst"
+        mock_login_response.status_code = 200
+        mock_session.post.return_value = mock_login_response
+
+        mock_auth_response = MagicMock()
+        mock_auth_response.status_code = 500
+        mock_session.get.return_value = mock_auth_response
+
+        success, response = strategy.login(
+            mock_session, "http://192.168.1.1", "admin", "password", redirect_form_config
+        )
+
+        assert success is False
+
+
+class TestHNAPSessionAuthStrategy:
+    """Test HNAPSessionAuthStrategy."""
+
+    @pytest.fixture
+    def hnap_config(self):
+        """Create an HNAP auth configuration."""
+        return HNAPAuthConfig(
+            strategy=AuthStrategyType.HNAP_SESSION,
+            login_url="/Login.html",
+            hnap_endpoint="/HNAP1/",
+            soap_action_namespace="http://purenetworks.com/HNAP1/",
+            session_timeout_indicator="UNAUTHORIZED",
+        )
+
+    def test_hnap_session_success(self, mock_session, hnap_config):
+        """Test successful HNAP session authentication."""
+        strategy = HNAPSessionAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<LoginResult>OK</LoginResult>"
+        mock_response.headers = {"Content-Type": "text/xml"}
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", hnap_config)
+
+        assert success is True
+        assert response is not None
+
+        # Verify SOAP action header
+        call_args = mock_session.post.call_args
+        assert call_args[1]["headers"]["SOAPAction"] == '"http://purenetworks.com/HNAP1/Login"'
+
+    def test_hnap_session_without_credentials(self, mock_session, hnap_config):
+        """Test HNAP session requires credentials."""
+        strategy = HNAPSessionAuthStrategy()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", None, None, hnap_config)
+
+        assert success is False
+        mock_session.post.assert_not_called()
+
+    def test_hnap_session_wrong_config_type(self, mock_session):
+        """Test HNAP session with wrong config type."""
+        strategy = HNAPSessionAuthStrategy()
+        wrong_config = MagicMock()
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", wrong_config)
+
+        assert success is False
+
+    def test_hnap_session_http_error(self, mock_session, hnap_config):
+        """Test HNAP session handles HTTP error."""
+        strategy = HNAPSessionAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", hnap_config)
+
+        assert success is False
+
+    def test_hnap_session_timeout_indicator(self, mock_session, hnap_config):
+        """Test HNAP session detects timeout indicator."""
+        strategy = HNAPSessionAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<LoginResult>UNAUTHORIZED</LoginResult>"
+        mock_response.headers = {"Content-Type": "text/xml"}
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", hnap_config)
+
+        assert success is False
+
+    def test_hnap_session_json_error_response(self, mock_session, hnap_config):
+        """Test HNAP session detects JSON error response."""
+        strategy = HNAPSessionAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '{"LoginResult":"FAILED"}'
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", hnap_config)
+
+        assert success is False
+
+    def test_hnap_session_timeout_handling(self, mock_session, hnap_config):
+        """Test HNAP session handles timeout."""
+        strategy = HNAPSessionAuthStrategy()
+
+        mock_session.post.side_effect = requests.exceptions.Timeout("Connection timed out")
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", hnap_config)
+
+        assert success is False
+
+    def test_hnap_session_connection_error(self, mock_session, hnap_config):
+        """Test HNAP session handles connection error."""
+        strategy = HNAPSessionAuthStrategy()
+
+        mock_session.post.side_effect = requests.exceptions.ConnectionError("Connection failed")
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", hnap_config)
+
+        assert success is False
+
+    def test_hnap_session_builds_correct_envelope(self, mock_session, hnap_config):
+        """Test HNAP session builds correct SOAP envelope."""
+        strategy = HNAPSessionAuthStrategy()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<LoginResult>OK</LoginResult>"
+        mock_response.headers = {"Content-Type": "text/xml"}
+        mock_session.post.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "http://192.168.1.1", "admin", "password", hnap_config)
+
+        # Verify envelope contains username and password
+        call_args = mock_session.post.call_args
+        envelope = call_args[1]["data"]
+        assert "<Username>admin</Username>" in envelope
+        assert "<Password>password</Password>" in envelope
+        assert 'xmlns="http://purenetworks.com/HNAP1/"' in envelope
+
+
 class TestAuthStrategyFactoryPattern:
     """Test that auth strategies can be instantiated and used polymorphically."""
 
@@ -184,6 +692,10 @@ class TestAuthStrategyFactoryPattern:
             NoAuthStrategy,
             BasicHttpAuthStrategy,
             FormPlainAuthStrategy,
+            FormBase64AuthStrategy,
+            FormPlainAndBase64AuthStrategy,
+            RedirectFormAuthStrategy,
+            HNAPSessionAuthStrategy,
         ],
     )
     def test_all_strategies_have_login_method(self, strategy_class):

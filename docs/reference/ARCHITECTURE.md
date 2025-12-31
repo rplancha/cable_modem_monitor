@@ -99,7 +99,26 @@ url_patterns = [
 ]
 ```
 
-### 5. Three-Tier Parser Selection Strategy
+### 5. Pluggable Authentication Strategies
+
+**Decision:** Authentication logic is encapsulated in strategy classes, separate from parsers.
+
+**Rationale:**
+- Parsers declare *what* auth they need, not *how* to implement it
+- Common auth patterns (form POST, HTTP basic, HNAP) are reusable
+- New auth methods can be added without modifying existing parsers
+
+**How it works:**
+1. Parser declares `auth_config` (e.g., `FormAuthConfig` with login path and field names)
+2. Parser's `login()` method calls `AuthFactory.get_strategy()` to get the right strategy
+3. Strategy handles protocol details (encoding, headers, session cookies)
+4. Parser receives success/failure result
+
+**Available strategies:** `NO_AUTH`, `BASIC_HTTP`, `FORM_PLAIN`, `FORM_BASE64`, `HNAP_SESSION`, and others.
+
+→ **For implementation details, see [`core/auth/README.md`](../../custom_components/cable_modem_monitor/core/auth/README.md)**
+
+### 6. Three-Tier Parser Selection Strategy
 
 **Decision:** Tiered fallback system for parser selection
 
@@ -124,7 +143,7 @@ url_patterns = [
 - Performance optimization via caching
 - Automatic detection for ease of setup
 
-### 6. Manufacturer Subdirectories
+### 7. Manufacturer Subdirectories
 
 **Decision:** Organize parsers in manufacturer-specific subdirectories
 

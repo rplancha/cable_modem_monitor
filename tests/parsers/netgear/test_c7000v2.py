@@ -187,8 +187,7 @@ class TestAuthentication:
 
     def test_has_basic_auth_config(self):
         """Test that parser has HTTP Basic Auth configuration."""
-        from custom_components.cable_modem_monitor.core.auth_config import BasicAuthConfig
-        from custom_components.cable_modem_monitor.core.authentication import AuthStrategyType
+        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, BasicAuthConfig
 
         parser = NetgearC7000v2Parser()
 

@@ -18,9 +18,12 @@ import logging
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth_config import HNAPAuthConfig
-from custom_components.cable_modem_monitor.core.authentication import AuthFactory, AuthStrategyType
-from custom_components.cable_modem_monitor.core.hnap_json_builder import HNAPJsonRequestBuilder
+from custom_components.cable_modem_monitor.core.auth import (
+    AuthFactory,
+    AuthStrategyType,
+    HNAPAuthConfig,
+    HNAPJsonRequestBuilder,
+)
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
 

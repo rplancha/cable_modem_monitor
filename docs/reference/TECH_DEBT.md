@@ -103,29 +103,9 @@ This document tracks known technical debt, architectural issues, and improvement
 
 ## P2 - Medium Priority
 
-### 4. HNAP/SOAP Builder Complexity
+### 4. ~~HNAP/SOAP Builder Complexity~~ ✅ COMPLETED
 
-**Problem:** Two separate HNAP builder classes exist:
-- `HNAPBuilder` (XML-based, used by SB8200)
-- `HNAPJsonBuilder` (JSON-based, used by S33, MB8611)
-
-Both handle similar authentication flows but with different action prefixes and response formats.
-
-**Impact:**
-- Potential for divergence in auth logic
-- Harder to add new HNAP modems
-- Knowledge siloed in implementation details
-
-**Remediation:**
-1. Document the HNAP protocol variations in ARCHITECTURE.md
-2. Consider base class with shared auth logic, subclasses for XML vs JSON
-3. Add integration tests for both builder types
-
-**Effort:** Medium (2 sessions for refactor, 1 for docs)
-
-**Files:**
-- `custom_components/cable_modem_monitor/core/hnap_builder.py`
-- `custom_components/cable_modem_monitor/core/hnap_json_builder.py`
+_Moved to Completed Items section._
 
 ---
 
@@ -352,6 +332,31 @@ Both handle similar authentication flows but with different action prefixes and 
 
 ---
 
+### 15. Unformalised Auth Patterns
+
+**Problem:** Some parsers implement auth logic inline in their `login()` method rather than using a formal auth strategy. This breaks the modular auth architecture.
+
+**Known cases:**
+- SB8200: URL token auth (base64 credentials appended to URL path)
+
+**Impact:**
+- Inconsistent auth handling across parsers
+- Blocks declarative parser configuration goals (JSON configs instead of Python)
+- Auth logic duplicated if another modem uses same pattern
+
+**Remediation:**
+1. Create `UrlTokenAuthStrategy` for SB8200 pattern
+2. Audit other parsers for inline auth logic
+3. Extract any remaining patterns into formal strategies
+
+**Effort:** Low (1 session per strategy)
+
+**Files:**
+- `custom_components/cable_modem_monitor/parsers/arris/sb8200.py`
+- `custom_components/cable_modem_monitor/core/auth/strategies/`
+
+---
+
 ## Related Documentation
 
 For feature roadmap and architectural enhancements (not code debt), see:
@@ -360,13 +365,37 @@ For feature roadmap and architectural enhancements (not code debt), see:
 Items consolidated from ARCHITECTURE.md "What Could Be Improved":
 - Parser-specific unit tests → Item #8 above
 - Error handling standardization → Item #9 above
-- Detection collision handling → Related to Item #4 (HNAP complexity)
+- Detection collision handling → ~~Related to Item #4~~ (HNAP refactor completed)
 
 ---
 
 ## Completed Items
 
-_Move items here when resolved, with date and PR reference._
+### 4. HNAP/SOAP Builder Complexity ✅
+
+**Completed:** December 2025
+
+**Solution:** Extracted auth logic into modular `core/auth/` package:
+```
+core/auth/
+├── base.py           # Base auth strategy class
+├── configs.py        # Auth configuration models
+├── factory.py        # Strategy factory
+├── types.py          # Type definitions
+├── hnap/             # HNAP JSON & XML builders (preserved)
+└── strategies/       # 7 auth strategies (basic_http, form_*, hnap_session, etc.)
+```
+
+**Benefits:**
+- Clear separation of auth strategies via Strategy pattern
+- HNAP builders preserved but properly organized under `hnap/`
+- Factory pattern simplifies parser auth configuration
+- All parsers updated to use new import paths (no logic changes)
+
+**Files Changed:**
+- Deleted: `core/auth_config.py`, `core/authentication.py`, `core/hnap_builder.py`, `core/hnap_json_builder.py`
+- Created: `core/auth/` package with 7 strategy implementations
+- Updated: All parser imports (import path changes only)
 
 ---
 

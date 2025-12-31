@@ -119,7 +119,7 @@ class TestCM2000Metadata:
 
     def test_auth_config(self):
         """Test authentication configuration is set correctly."""
-        from custom_components.cable_modem_monitor.core.authentication import AuthStrategyType
+        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType
 
         assert NetgearCM2000Parser.auth_config.strategy == AuthStrategyType.FORM_PLAIN
         assert NetgearCM2000Parser.auth_config.login_url == "/goform/Login"

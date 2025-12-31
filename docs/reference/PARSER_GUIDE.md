@@ -69,8 +69,7 @@ from __future__ import annotations
 import logging
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth_config import BasicAuthConfig
-from custom_components.cable_modem_monitor.core.authentication import AuthStrategyType
+from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, BasicAuthConfig
 from ..base_parser import ModemParser
 
 _LOGGER = logging.getLogger(__name__)
@@ -246,8 +245,7 @@ class [Manufacturer][Model]Parser(ModemParser):
 
 #### HTTP Basic Auth
 ```python
-from custom_components.cable_modem_monitor.core.auth_config import BasicAuthConfig
-from custom_components.cable_modem_monitor.core.authentication import AuthStrategyType
+from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, BasicAuthConfig
 
 auth_config = BasicAuthConfig(
     strategy=AuthStrategyType.BASIC_HTTP,
@@ -260,10 +258,10 @@ def login(self, session, base_url, username, password) -> bool:
 
 #### Form-Based Auth
 ```python
-from custom_components.cable_modem_monitor.core.auth_config import FormAuthConfig
+from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, FormAuthConfig
 
 auth_config = FormAuthConfig(
-    strategy=AuthStrategyType.FORM_POST,
+    strategy=AuthStrategyType.FORM_PLAIN,
     login_url="/login.html",
     username_field="username",
     password_field="password",
@@ -282,7 +280,7 @@ def login(self, session, base_url, username, password) -> bool:
 HNAP is a [SOAP](https://www.w3.org/TR/soap/)-based protocol used by some Motorola and Arris modems. Originally developed by Pure Networks (acquired by Cisco), it's still used for local device management despite being abandoned by its original stewards.
 
 ```python
-from custom_components.cable_modem_monitor.core.auth_config import HNAPAuthConfig
+from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, HNAPAuthConfig
 
 auth_config = HNAPAuthConfig(
     strategy=AuthStrategyType.HNAP_SESSION,

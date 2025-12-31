@@ -153,7 +153,7 @@ class YourModemParser(ModemParser):
         - HNAP: Use AuthFactory.get_strategy(AuthStrategyType.HNAP)
 
         Example (HTTP Basic Auth):
-            from custom_components.cable_modem_monitor.core.authentication import AuthFactory
+            from custom_components.cable_modem_monitor.core.auth import AuthFactory
             auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
             return auth_strategy.login(session, base_url, username, password, self.auth_config)
 

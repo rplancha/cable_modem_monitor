@@ -30,7 +30,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth_config import BasicAuthConfig
+from custom_components.cable_modem_monitor.core.auth import BasicAuthConfig
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
 

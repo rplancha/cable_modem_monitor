@@ -367,8 +367,7 @@ class TestAuthentication:
 
     def test_has_basic_auth_config(self):
         """Test that parser has HTTP Basic Auth configuration."""
-        from custom_components.cable_modem_monitor.core.auth_config import BasicAuthConfig
-        from custom_components.cable_modem_monitor.core.authentication import AuthStrategyType
+        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, BasicAuthConfig
 
         parser = NetgearCM600Parser()
 
@@ -426,7 +425,7 @@ class TestAuthentication:
         base_url = "http://192.168.100.1"
 
         # Mock AuthFactory - Basic Auth should skip when no credentials
-        auth_path = "custom_components.cable_modem_monitor.core.authentication.AuthFactory"
+        auth_path = "custom_components.cable_modem_monitor.core.auth.AuthFactory"
         with patch(auth_path) as mock_factory:
             mock_strategy = Mock()
             mock_strategy.login.return_value = (True, None)  # Skip login, return success

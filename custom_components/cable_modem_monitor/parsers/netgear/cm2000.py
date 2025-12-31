@@ -35,8 +35,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth_config import FormAuthConfig
-from custom_components.cable_modem_monitor.core.authentication import AuthStrategyType
+from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, FormAuthConfig
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
 

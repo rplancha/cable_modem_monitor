@@ -8,10 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from custom_components.cable_modem_monitor.core.hnap_json_builder import (
-    HNAPJsonRequestBuilder,
-    _hmac_md5,
-)
+from custom_components.cable_modem_monitor.core.auth import HNAPJsonRequestBuilder
+from custom_components.cable_modem_monitor.core.auth.hnap.json_builder import _hmac_md5
 
 
 class TestHmacMd5:

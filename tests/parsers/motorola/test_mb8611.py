@@ -9,15 +9,11 @@ from unittest.mock import Mock, patch
 import pytest
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth_config import (
-    HNAPAuthConfig,
-)
-from custom_components.cable_modem_monitor.core.authentication import (
+from custom_components.cable_modem_monitor.core.auth import (
     AuthStrategyType,
-)
-from custom_components.cable_modem_monitor.core.hnap_builder import HNAPRequestBuilder
-from custom_components.cable_modem_monitor.core.hnap_json_builder import (
+    HNAPAuthConfig,
     HNAPJsonRequestBuilder,
+    HNAPRequestBuilder,
 )
 from custom_components.cable_modem_monitor.parsers.motorola.mb8611 import (
     MotorolaMB8611HnapParser,

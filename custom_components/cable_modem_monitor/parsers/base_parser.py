@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from bs4 import BeautifulSoup
 
 if TYPE_CHECKING:
-    from custom_components.cable_modem_monitor.core.auth_config import AuthConfig
+    from custom_components.cable_modem_monitor.core.auth import AuthConfig
 
 
 class ParserStatus(str, Enum):

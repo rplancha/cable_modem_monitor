@@ -6,8 +6,7 @@ import logging
 
 from bs4 import BeautifulSoup, Tag
 
-from custom_components.cable_modem_monitor.core.auth_config import BasicAuthConfig
-from custom_components.cable_modem_monitor.core.authentication import AuthFactory, AuthStrategyType
+from custom_components.cable_modem_monitor.core.auth import AuthFactory, AuthStrategyType, BasicAuthConfig
 from custom_components.cable_modem_monitor.lib.utils import extract_float, extract_number, parse_uptime_to_seconds
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
