@@ -190,6 +190,17 @@ def get_container_status() -> tuple[str, bool]:
 def get_port_mapping() -> str:
     """Get the port mapping for the container."""
     try:
+        # First check if container uses host networking (no port mapping needed)
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.HostConfig.NetworkMode}}", CONTAINER_NAME],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip() == "host":
+            return f"host networking (direct access to port {HA_PORT})"
+
+        # Otherwise check for port mapping
         result = subprocess.run(
             ["docker", "port", CONTAINER_NAME, str(HA_PORT)], capture_output=True, text=True, timeout=10
         )

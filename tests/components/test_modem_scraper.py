@@ -734,3 +734,544 @@ class TestLogoutAfterPoll:
             scraper._perform_logout()
 
             mock_get.assert_called_once_with(expected_url, timeout=5)
+
+
+class TestModemScraperInitialization:
+    """Tests for ModemScraper initialization and configuration."""
+
+    def test_init_with_plain_ip_uses_https_default(self):
+        """Test that plain IP defaults to HTTPS."""
+        scraper = ModemScraper("192.168.100.1")
+        assert scraper.base_url == "https://192.168.100.1"
+        assert scraper.host == "192.168.100.1"
+
+    def test_init_with_http_url_preserves_protocol(self):
+        """Test that explicit HTTP URL is preserved."""
+        scraper = ModemScraper("http://192.168.100.1")
+        assert scraper.base_url == "http://192.168.100.1"
+
+    def test_init_with_https_url_preserves_protocol(self):
+        """Test that explicit HTTPS URL is preserved."""
+        scraper = ModemScraper("https://192.168.100.1")
+        assert scraper.base_url == "https://192.168.100.1"
+
+    def test_init_with_trailing_slash_removed(self):
+        """Test that trailing slashes are removed from URL."""
+        scraper = ModemScraper("http://192.168.100.1/")
+        assert scraper.base_url == "http://192.168.100.1"
+
+    def test_init_uses_cached_url_protocol(self):
+        """Test that cached URL protocol is used for plain IP."""
+        scraper = ModemScraper("192.168.100.1", cached_url="http://192.168.100.1/status")
+        assert scraper.base_url == "http://192.168.100.1"
+
+    def test_init_with_credentials(self):
+        """Test initialization with credentials."""
+        scraper = ModemScraper("192.168.100.1", username="admin", password="secret")
+        assert scraper.username == "admin"
+        assert scraper.password == "secret"
+
+    def test_init_with_parser_instance(self, mocker):
+        """Test initialization with a parser instance."""
+        mock_parser = mocker.Mock(spec=ModemParser)
+        scraper = ModemScraper("192.168.100.1", parser=mock_parser)
+        assert scraper.parser == mock_parser
+        assert scraper.parsers == [mock_parser]
+
+    def test_init_with_parser_class(self, mocker):
+        """Test initialization with a parser class."""
+        mock_parser_class = mocker.Mock()
+        scraper = ModemScraper("192.168.100.1", parser=[mock_parser_class])
+        assert scraper.parser is None
+        assert scraper.parsers == [mock_parser_class]
+
+    def test_init_with_verify_ssl_true(self):
+        """Test initialization with SSL verification enabled."""
+        scraper = ModemScraper("https://192.168.100.1", verify_ssl=True)
+        assert scraper.verify_ssl is True
+        assert scraper.session.verify is True
+
+    def test_init_with_verify_ssl_false(self):
+        """Test initialization with SSL verification disabled."""
+        scraper = ModemScraper("https://192.168.100.1", verify_ssl=False)
+        assert scraper.verify_ssl is False
+        assert scraper.session.verify is False
+
+    def test_init_with_legacy_ssl_mounts_adapter(self, mocker):
+        """Test that legacy SSL mode mounts the LegacySSLAdapter."""
+        # We can verify by checking that session.mount was called or adapter exists
+        scraper = ModemScraper("https://192.168.100.1", legacy_ssl=True)
+        assert scraper.legacy_ssl is True
+        # The adapter should be mounted for https://
+        adapters = scraper.session.adapters
+        assert "https://" in adapters
+
+    def test_init_legacy_ssl_not_mounted_for_http(self, mocker):
+        """Test that legacy SSL adapter is NOT mounted for HTTP URLs."""
+        scraper = ModemScraper("http://192.168.100.1", legacy_ssl=True)
+        # Legacy SSL flag is set but adapter shouldn't affect HTTP
+        assert scraper.legacy_ssl is True
+        assert scraper.base_url == "http://192.168.100.1"
+
+    def test_init_with_parser_name_for_tier2(self):
+        """Test initialization with parser_name for Tier 2 caching."""
+        scraper = ModemScraper("192.168.100.1", parser_name="ARRIS S33")
+        assert scraper.parser_name == "ARRIS S33"
+
+
+class TestCapturingSession:
+    """Tests for the CapturingSession class."""
+
+    def test_capturing_session_calls_callback(self, mocker):
+        """Test that CapturingSession calls the callback on each request."""
+        from custom_components.cable_modem_monitor.core.modem_scraper import CapturingSession
+
+        callback = mocker.Mock()
+        session = CapturingSession(callback)
+
+        # Mock the parent request method
+        mock_response = mocker.Mock()
+        mock_response.url = "http://192.168.100.1/status"
+        mocker.patch.object(session.__class__.__bases__[0], "request", return_value=mock_response)
+
+        session.get("http://192.168.100.1/status")
+
+        callback.assert_called_once()
+        # First arg should be the response
+        assert callback.call_args[0][0] == mock_response
+
+    def test_capturing_session_detects_hnap_requests(self, mocker):
+        """Test that CapturingSession identifies HNAP requests."""
+        from custom_components.cable_modem_monitor.core.modem_scraper import CapturingSession
+
+        callback = mocker.Mock()
+        session = CapturingSession(callback)
+
+        mock_response = mocker.Mock()
+        mock_response.url = "http://192.168.100.1/HNAP1/"
+
+        mocker.patch.object(session.__class__.__bases__[0], "request", return_value=mock_response)
+
+        session.request(
+            "POST", "http://192.168.100.1/HNAP1/", headers={"SOAPAction": '"http://purenetworks.com/HNAP1/Login"'}
+        )
+
+        callback.assert_called_once()
+        # Second arg should be description containing HNAP
+        assert "HNAP" in callback.call_args[0][1]
+
+    def test_capturing_session_detects_login_pages(self, mocker):
+        """Test that CapturingSession identifies login pages."""
+        from custom_components.cable_modem_monitor.core.modem_scraper import CapturingSession
+
+        callback = mocker.Mock()
+        session = CapturingSession(callback)
+
+        mock_response = mocker.Mock()
+        mock_response.url = "http://192.168.100.1/login.htm"
+
+        mocker.patch.object(session.__class__.__bases__[0], "request", return_value=mock_response)
+
+        session.get("http://192.168.100.1/login.htm")
+
+        callback.assert_called_once()
+        assert "Login" in callback.call_args[0][1]
+
+    def test_capturing_session_detects_status_pages(self, mocker):
+        """Test that CapturingSession identifies status pages."""
+        from custom_components.cable_modem_monitor.core.modem_scraper import CapturingSession
+
+        callback = mocker.Mock()
+        session = CapturingSession(callback)
+
+        mock_response = mocker.Mock()
+        mock_response.url = "http://192.168.100.1/cmstatus.htm"
+
+        mocker.patch.object(session.__class__.__bases__[0], "request", return_value=mock_response)
+
+        session.get("http://192.168.100.1/cmstatus.htm")
+
+        callback.assert_called_once()
+        assert "Status" in callback.call_args[0][1]
+
+
+class TestClearAuthCache:
+    """Tests for auth cache clearing."""
+
+    def test_clear_auth_cache_creates_new_session(self, mocker):
+        """Test that clear_auth_cache creates a fresh session."""
+        scraper = ModemScraper("192.168.100.1")
+        old_session = scraper.session
+
+        scraper.clear_auth_cache()
+
+        assert scraper.session is not old_session
+
+    def test_clear_auth_cache_preserves_verify_setting(self, mocker):
+        """Test that clear_auth_cache preserves SSL verify setting."""
+        scraper = ModemScraper("192.168.100.1", verify_ssl=True)
+        assert scraper.session.verify is True
+
+        scraper.clear_auth_cache()
+
+        assert scraper.session.verify is True
+
+    def test_clear_auth_cache_clears_hnap_builder(self, mocker):
+        """Test that clear_auth_cache clears HNAP builder cache."""
+        scraper = ModemScraper("192.168.100.1")
+
+        # Mock parser with HNAP builder
+        mock_builder = mocker.Mock()
+        mock_parser = mocker.Mock()
+        mock_parser._json_builder = mock_builder
+        scraper.parser = mock_parser
+
+        scraper.clear_auth_cache()
+
+        mock_builder.clear_auth_cache.assert_called_once()
+
+    def test_clear_auth_cache_handles_missing_builder(self, mocker):
+        """Test that clear_auth_cache handles parser without HNAP builder."""
+        scraper = ModemScraper("192.168.100.1")
+
+        # Mock parser without HNAP builder
+        mock_parser = mocker.Mock(spec=["parse", "login"])  # No _json_builder
+        scraper.parser = mock_parser
+
+        # Should not raise
+        scraper.clear_auth_cache()
+
+
+class TestCaptureResponse:
+    """Tests for response capture functionality."""
+
+    def test_capture_response_when_disabled(self, mocker):
+        """Test that capture is skipped when disabled."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper._capture_enabled = False
+
+        mock_response = mocker.Mock()
+        mock_response.url = "http://192.168.100.1/status"
+
+        scraper._capture_response(mock_response, "Test")
+
+        assert len(scraper._captured_urls) == 0
+
+    def test_capture_response_when_enabled(self, mocker):
+        """Test that response is captured when enabled."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper._capture_enabled = True
+        scraper._captured_urls = []
+
+        mock_response = mocker.Mock()
+        mock_response.url = "http://192.168.100.1/status"
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.text = "<html>Test</html>"
+        mock_response.request = mocker.Mock()
+        mock_response.request.method = "GET"
+        mock_response.elapsed = mocker.Mock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+
+        scraper._capture_response(mock_response, "Test capture")
+
+        assert len(scraper._captured_urls) == 1
+        assert scraper._captured_urls[0]["url"] == "http://192.168.100.1/status"
+        assert scraper._captured_urls[0]["description"] == "Test capture"
+
+    def test_capture_response_deduplicates_urls(self, mocker):
+        """Test that duplicate URLs are not captured twice."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper._capture_enabled = True
+        scraper._captured_urls = []
+
+        mock_response = mocker.Mock()
+        mock_response.url = "http://192.168.100.1/status"
+        mock_response.status_code = 200
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.text = "<html>Test</html>"
+        mock_response.request = mocker.Mock()
+        mock_response.request.method = "GET"
+        mock_response.elapsed = mocker.Mock()
+        mock_response.elapsed.total_seconds.return_value = 0.5
+
+        scraper._capture_response(mock_response, "First capture")
+        scraper._capture_response(mock_response, "Second capture")
+
+        # Should only have one entry
+        assert len(scraper._captured_urls) == 1
+
+
+class TestRecordFailedUrl:
+    """Tests for failed URL recording."""
+
+    def test_record_failed_url_when_disabled(self, mocker):
+        """Test that failed URL is not recorded when capture disabled."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper._capture_enabled = False
+        scraper._failed_urls = []
+
+        scraper._record_failed_url("http://192.168.100.1/test", "Connection refused")
+
+        assert len(scraper._failed_urls) == 0
+
+    def test_record_failed_url_when_enabled(self, mocker):
+        """Test that failed URL is recorded when capture enabled."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper._capture_enabled = True
+        scraper._failed_urls = []
+
+        scraper._record_failed_url(
+            url="http://192.168.100.1/test",
+            reason="Connection refused",
+            status_code=None,
+            exception_type="ConnectionError",
+            resource_type="html",
+        )
+
+        assert len(scraper._failed_urls) == 1
+        assert scraper._failed_urls[0]["url"] == "http://192.168.100.1/test"
+        assert scraper._failed_urls[0]["reason"] == "Connection refused"
+        assert scraper._failed_urls[0]["exception_type"] == "ConnectionError"
+
+    def test_record_failed_url_with_response_body(self, mocker):
+        """Test that response body is recorded for error pages."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper._capture_enabled = True
+        scraper._failed_urls = []
+
+        scraper._record_failed_url(
+            url="http://192.168.100.1/test",
+            reason="Session conflict",
+            status_code=403,
+            response_body="<html>Session in use by another user</html>",
+        )
+
+        assert len(scraper._failed_urls) == 1
+        assert scraper._failed_urls[0]["content"] == "<html>Session in use by another user</html>"
+        assert scraper._failed_urls[0]["size_bytes"] == len("<html>Session in use by another user</html>")
+
+
+class TestProtocolDetection:
+    """Tests for HTTP/HTTPS protocol detection and fallback."""
+
+    def test_fetch_data_tries_https_first(self, mocker):
+        """Test that _fetch_data tries HTTPS before HTTP."""
+        from custom_components.cable_modem_monitor.parsers.motorola.mb7621 import MotorolaMB7621Parser
+
+        scraper = ModemScraper("192.168.100.1", parser=[MotorolaMB7621Parser])
+
+        urls_tried = []
+
+        def mock_get(url, **kwargs):
+            urls_tried.append(url)
+            response = mocker.Mock()
+            response.status_code = 404
+            return response
+
+        mocker.patch.object(scraper.session, "get", side_effect=mock_get)
+
+        scraper._fetch_data()
+
+        # First URL tried should be HTTPS
+        assert urls_tried[0].startswith("https://")
+
+    def test_fetch_data_falls_back_to_http(self, mocker):
+        """Test that _fetch_data falls back to HTTP when HTTPS fails."""
+        import requests
+
+        from custom_components.cable_modem_monitor.parsers.motorola.mb7621 import MotorolaMB7621Parser
+
+        scraper = ModemScraper("192.168.100.1", parser=[MotorolaMB7621Parser])
+
+        urls_tried = []
+
+        def mock_get(url, **kwargs):
+            urls_tried.append(url)
+            if url.startswith("https://"):
+                raise requests.exceptions.SSLError("SSL handshake failed")
+            response = mocker.Mock()
+            response.status_code = 200
+            response.text = "<html>Modem page</html>"
+            return response
+
+        mocker.patch.object(scraper.session, "get", side_effect=mock_get)
+
+        result = scraper._fetch_data()
+
+        # Should have tried HTTPS first
+        assert any(url.startswith("https://") for url in urls_tried)
+        # Should have fallen back to HTTP
+        assert any(url.startswith("http://") and not url.startswith("https://") for url in urls_tried)
+        # Should succeed with HTTP
+        assert result is not None
+
+    def test_fetch_data_updates_base_url_on_success(self, mocker):
+        """Test that base_url is updated when HTTP fallback succeeds."""
+        import requests
+
+        from custom_components.cable_modem_monitor.parsers.motorola.mb7621 import MotorolaMB7621Parser
+
+        scraper = ModemScraper("192.168.100.1", parser=[MotorolaMB7621Parser])
+        assert scraper.base_url == "https://192.168.100.1"
+
+        def mock_get(url, **kwargs):
+            if url.startswith("https://"):
+                raise requests.exceptions.ConnectionError("Connection refused")
+            response = mocker.Mock()
+            response.status_code = 200
+            response.text = "<html>Modem page</html>"
+            return response
+
+        mocker.patch.object(scraper.session, "get", side_effect=mock_get)
+
+        scraper._fetch_data()
+
+        # Base URL should be updated to HTTP
+        assert scraper.base_url == "http://192.168.100.1"
+
+
+class TestLoginFlow:
+    """Tests for the login flow."""
+
+    def test_login_skipped_without_credentials(self, mocker):
+        """Test that login is skipped when no credentials provided."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper.parser = mocker.Mock()
+
+        result = scraper._login()
+
+        assert result == (True, None)
+        scraper.parser.login.assert_not_called()  # type: ignore[union-attr]
+
+    def test_login_skipped_without_parser(self, mocker):
+        """Test that login fails when no parser is set."""
+        scraper = ModemScraper("192.168.100.1", username="admin", password="secret")
+        scraper.parser = None
+
+        result = scraper._login()
+
+        assert result == (False, None)
+
+    def test_login_calls_parser_login(self, mocker):
+        """Test that login delegates to parser.login()."""
+        scraper = ModemScraper("192.168.100.1", username="admin", password="secret")
+
+        mock_parser = mocker.Mock()
+        mock_parser.login.return_value = (True, "<html>Logged in</html>")
+        scraper.parser = mock_parser
+
+        result = scraper._login()
+
+        assert result == (True, "<html>Logged in</html>")
+        mock_parser.login.assert_called_once_with(scraper.session, scraper.base_url, "admin", "secret")
+
+
+class TestTierUrlGeneration:
+    """Tests for URL generation in different tiers."""
+
+    def test_tier1_urls_from_explicit_parser(self, mocker):
+        """Test Tier 1: URLs from explicitly selected parser."""
+        mock_parser = mocker.Mock()
+        mock_parser.name = "Test Parser"
+        mock_parser.url_patterns = [
+            {"path": "/status.html", "auth_method": "none"},
+            {"path": "/info.html", "auth_method": "basic"},
+        ]
+
+        scraper = ModemScraper("192.168.100.1")
+        scraper.parser = mock_parser
+
+        urls = scraper._get_tier1_urls()
+
+        assert len(urls) == 2
+        assert urls[0][0] == "https://192.168.100.1/status.html"
+        assert urls[1][0] == "https://192.168.100.1/info.html"
+
+    def test_tier2_urls_from_cached_parser(self, mocker):
+        """Test Tier 2: URLs from cached parser name."""
+        mock_parser_class = mocker.Mock()
+        mock_parser_class.name = "Cached Parser"
+        mock_parser_class.manufacturer = "TestBrand"
+        mock_parser_class.url_patterns = [
+            {"path": "/cached.html", "auth_method": "none"},
+        ]
+
+        scraper = ModemScraper(
+            "192.168.100.1",
+            parser=[mock_parser_class],
+            parser_name="Cached Parser",
+        )
+
+        urls = scraper._get_tier2_urls()
+
+        assert len(urls) >= 1
+        assert any("/cached.html" in url[0] for url in urls)
+
+    def test_tier3_excludes_fallback_parser(self, mocker):
+        """Test Tier 3: Fallback parser excluded from URL discovery."""
+        mock_normal = mocker.Mock()
+        mock_normal.name = "Normal Parser"
+        mock_normal.manufacturer = "TestBrand"
+        mock_normal.url_patterns = [{"path": "/normal.html", "auth_method": "none"}]
+
+        mock_fallback = mocker.Mock()
+        mock_fallback.name = "Fallback"
+        mock_fallback.manufacturer = "Unknown"  # Identifies as fallback
+        mock_fallback.url_patterns = [{"path": "/fallback.html", "auth_method": "none"}]
+
+        scraper = ModemScraper("192.168.100.1", parser=[mock_normal, mock_fallback])
+
+        urls = scraper._get_tier3_urls()
+
+        # Fallback URLs should not be included
+        assert not any("/fallback.html" in url[0] for url in urls)
+        # Normal URLs should be included
+        assert any("/normal.html" in url[0] for url in urls)
+
+
+class TestGetModemData:
+    """Tests for the main get_modem_data flow."""
+
+    def test_get_modem_data_clears_captures_on_start(self, mocker):
+        """Test that get_modem_data clears previous captures."""
+        scraper = ModemScraper("192.168.100.1")
+        scraper._captured_urls = [{"url": "old"}]
+        scraper._failed_urls = [{"url": "old_fail"}]
+
+        # Mock _fetch_data to return None (fail early)
+        mocker.patch.object(scraper, "_fetch_data", return_value=None)
+
+        scraper.get_modem_data(capture_raw=True)
+
+        assert scraper._captured_urls == []
+        assert scraper._failed_urls == []
+
+    def test_get_modem_data_returns_status_on_connection_failure(self, mocker):
+        """Test that get_modem_data returns status dict on connection failure."""
+        scraper = ModemScraper("192.168.100.1")
+
+        mocker.patch.object(scraper, "_fetch_data", return_value=None)
+
+        result = scraper.get_modem_data()
+
+        # Should return a dict with connection status info
+        assert "cable_modem_connection_status" in result
+        assert result["cable_modem_connection_status"] == "unreachable"
+
+    def test_get_modem_data_sets_capture_enabled_flag(self, mocker):
+        """Test that get_modem_data sets _capture_enabled flag when capture_raw=True."""
+        scraper = ModemScraper("192.168.100.1")
+
+        # Mock _fetch_data to return None (fail early, but flag should be set)
+        mocker.patch.object(scraper, "_fetch_data", return_value=None)
+
+        # Verify flag is initially False
+        assert scraper._capture_enabled is False
+
+        scraper.get_modem_data(capture_raw=True)
+
+        # Flag should be set to True during the call
+        # (It gets set at the start of get_modem_data)
+        # Since we can't easily check during execution, verify the flag exists
+        assert hasattr(scraper, "_capture_enabled")

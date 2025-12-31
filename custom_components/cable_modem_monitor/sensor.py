@@ -66,7 +66,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Cable Modem Monitor sensors."""
-    _LOGGER.info("async_setup_entry called for %s", entry.entry_id)
+    _LOGGER.debug("async_setup_entry called for %s", entry.entry_id)
     coordinator = hass.data[DOMAIN][entry.entry_id]
     _LOGGER.debug("Coordinator data has %s upstream channels", len(coordinator.data.get("cable_modem_upstream", [])))
 

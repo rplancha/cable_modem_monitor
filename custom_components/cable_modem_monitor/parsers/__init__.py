@@ -134,7 +134,7 @@ def get_parsers(use_cache: bool = True) -> list[type[ModemParser]]:  # noqa: C90
                         and attr.__module__ == module.__name__
                     ):
                         parsers.append(attr)
-                        _LOGGER.info(
+                        _LOGGER.debug(
                             "Registered parser: %s (%s, models: %s)", attr.name, attr.manufacturer, attr.models
                         )
                         found_parser_in_module = True
