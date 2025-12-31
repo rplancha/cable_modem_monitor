@@ -291,11 +291,33 @@ class TestS33DownstreamParsing:
         assert ch1["channel_id"] == 20
         assert ch1["lock_status"] == "Locked"
         assert ch1["modulation"] == "QAM256"
+        assert ch1["channel_type"] == "qam"  # Derived from modulation
         assert ch1["frequency"] == 537000000  # Hz
         assert ch1["power"] == 5.0
         assert ch1["snr"] == 40.0
         assert ch1["corrected"] == 1234
         assert ch1["uncorrected"] == 5
+
+    def test_parse_downstream_ofdm_channel_type(self):
+        """Test that OFDM modulation strings derive channel_type='ofdm' (issue #87)."""
+        parser = ArrisS33HnapParser()
+        response = {
+            "GetCustomerStatusDownstreamChannelInfoResponse": {
+                "CustomerConnDownstreamChannel": (
+                    "1^Locked^OFDM PLC^33^722000000 Hz^5 dBmV^40 dB^100^0|+|"
+                    "2^Locked^QAM256^1^537000000 Hz^5 dBmV^40 dB^100^0"
+                )
+            }
+        }
+        channels = parser._parse_downstream_from_hnap(response)
+
+        assert len(channels) == 2
+        # OFDM PLC -> channel_type: ofdm
+        assert channels[0]["modulation"] == "OFDM PLC"
+        assert channels[0]["channel_type"] == "ofdm"
+        # QAM256 -> channel_type: qam
+        assert channels[1]["modulation"] == "QAM256"
+        assert channels[1]["channel_type"] == "qam"
 
     def test_parse_downstream_frequency_in_mhz(self):
         """Test parsing frequency when provided in MHz without Hz suffix (line 298)."""
@@ -365,9 +387,31 @@ class TestS33UpstreamParsing:
         assert ch1["channel_id"] == 1
         assert ch1["lock_status"] == "Locked"
         assert ch1["modulation"] == "SC-QAM"
+        assert ch1["channel_type"] == "atdma"  # Derived from modulation
         assert ch1["symbol_rate"] == "5120 Ksym/sec"
         assert ch1["frequency"] == 38600000  # Hz
         assert ch1["power"] == 43.0
+
+    def test_parse_upstream_ofdma_channel_type(self):
+        """Test that OFDMA modulation strings derive channel_type='ofdma'."""
+        parser = ArrisS33HnapParser()
+        response = {
+            "GetCustomerStatusUpstreamChannelInfoResponse": {
+                "CustomerConnUpstreamChannel": (
+                    "1^Locked^OFDMA^5^5120 Ksym/sec^38600000 Hz^43 dBmV|+|"
+                    "2^Locked^SC-QAM^1^5120 Ksym/sec^30600000 Hz^45 dBmV"
+                )
+            }
+        }
+        channels = parser._parse_upstream_from_hnap(response)
+
+        assert len(channels) == 2
+        # OFDMA -> channel_type: ofdma
+        assert channels[0]["modulation"] == "OFDMA"
+        assert channels[0]["channel_type"] == "ofdma"
+        # SC-QAM -> channel_type: atdma
+        assert channels[1]["modulation"] == "SC-QAM"
+        assert channels[1]["channel_type"] == "atdma"
 
     def test_parse_upstream_frequency_in_mhz(self):
         """Test parsing upstream frequency when provided in MHz without Hz suffix (line 382)."""

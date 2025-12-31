@@ -363,10 +363,15 @@ class MotorolaMB8611HnapParser(ModemParser):
                     corrected = int(fields[7])
                     uncorrected = int(fields[8])
 
+                    # Derive channel_type from modulation string
+                    # MB8611 returns "OFDM" for OFDM channels, "QAM256" etc for SC-QAM
+                    channel_type = "ofdm" if "ofdm" in modulation.lower() else "qam"
+
                     channel_info = {
                         "channel_id": channel_id,
                         "lock_status": lock_status,
                         "modulation": modulation,
+                        "channel_type": channel_type,
                         "frequency": int(frequency),
                         "power": power,
                         "snr": snr,
@@ -434,10 +439,15 @@ class MotorolaMB8611HnapParser(ModemParser):
                     frequency = int(round(float(fields[5].strip()) * 1_000_000))  # MHz to Hz
                     power = float(fields[6].strip())
 
+                    # Derive channel_type from modulation string
+                    # MB8611 returns "OFDMA" for OFDMA channels, "ATDMA"/etc for SC-QAM
+                    channel_type = "ofdma" if "ofdma" in modulation.lower() else "atdma"
+
                     channel_info = {
                         "channel_id": channel_id,
                         "lock_status": lock_status,
                         "modulation": modulation,
+                        "channel_type": channel_type,
                         "symbol_rate": symbol_rate,
                         "frequency": int(frequency),
                         "power": power,

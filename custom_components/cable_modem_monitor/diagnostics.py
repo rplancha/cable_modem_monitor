@@ -474,6 +474,8 @@ def _build_diagnostics_dict(hass: HomeAssistant, coordinator, entry: ConfigEntry
                 "snr": ch.get("snr"),
                 "corrected": ch.get("corrected"),
                 "uncorrected": ch.get("uncorrected"),
+                "modulation": ch.get("modulation"),
+                "channel_type": ch.get("channel_type"),
             }
             for ch in data.get("cable_modem_downstream", [])
         ],
@@ -482,6 +484,8 @@ def _build_diagnostics_dict(hass: HomeAssistant, coordinator, entry: ConfigEntry
                 "channel": ch.get("channel_id"),
                 "frequency": ch.get("frequency"),
                 "power": ch.get("power"),
+                "modulation": ch.get("modulation"),
+                "channel_type": ch.get("channel_type"),
             }
             for ch in data.get("cable_modem_upstream", [])
         ],

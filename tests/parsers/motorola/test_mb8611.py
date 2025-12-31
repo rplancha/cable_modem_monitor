@@ -173,6 +173,7 @@ class TestHnapParsing:
         assert first_channel["channel_id"] == 20  # DOCSIS Channel ID
         assert first_channel["lock_status"] == "Locked"
         assert first_channel["modulation"] == "QAM256"
+        assert first_channel["channel_type"] == "qam"  # Derived from modulation
         assert first_channel["frequency"] == 543_000_000  # 543.0 MHz
         assert first_channel["power"] == 1.4
         assert first_channel["snr"] == 45.1
@@ -183,6 +184,7 @@ class TestHnapParsing:
         ofdm_channel = data["downstream"][32]
         assert ofdm_channel["channel_id"] == 193  # DOCSIS Channel ID
         assert ofdm_channel["modulation"] == "OFDM PLC"
+        assert ofdm_channel["channel_type"] == "ofdm"  # Derived from modulation (issue #87)
         assert ofdm_channel["frequency"] == 957_000_000  # 957.0 MHz
         assert ofdm_channel["power"] == -4.1
         assert ofdm_channel["snr"] == 41.1
@@ -213,6 +215,7 @@ class TestHnapParsing:
         assert first_channel["channel_id"] == 17  # DOCSIS Channel ID
         assert first_channel["lock_status"] == "Locked"
         assert first_channel["modulation"] == "SC-QAM"
+        assert first_channel["channel_type"] == "atdma"  # Derived from modulation
         assert first_channel["symbol_rate"] == 5120
         # 16.4 MHz converted to Hz - account for floating-point precision
         assert abs(first_channel["frequency"] - 16_400_000) <= 1
@@ -223,6 +226,7 @@ class TestHnapParsing:
         assert last_channel["channel_id"] == 20  # DOCSIS Channel ID
         assert last_channel["lock_status"] == "Locked"
         assert last_channel["modulation"] == "SC-QAM"
+        assert last_channel["channel_type"] == "atdma"  # Derived from modulation
         # 35.6 MHz converted to Hz - account for floating-point precision
         assert abs(last_channel["frequency"] - 35_600_000) <= 1
         assert last_channel["power"] == 45.5

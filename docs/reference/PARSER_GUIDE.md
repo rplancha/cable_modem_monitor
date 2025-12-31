@@ -164,9 +164,16 @@ class [Manufacturer][Model]Parser(ModemParser):
             - frequency: Frequency in Hz (int)
             - power: Power level in dBmV (float)
             - snr: Signal-to-noise ratio in dB (float)
-            - modulation: Modulation type (string, e.g., "QAM256")
+            - modulation: Modulation type (string, e.g., "QAM256", "OFDM PLC")
+            - channel_type: Channel technology - "qam" or "ofdm" (REQUIRED for DOCSIS 3.1)
             - corrected: Corrected error count (int)
             - uncorrected: Uncorrected error count (int)
+
+        Note on channel_type vs modulation:
+            - channel_type: The DOCSIS transport technology (qam/ofdm for downstream)
+            - modulation: The encoding scheme (QAM256, QAM4096, etc.)
+            An OFDM channel uses QAM4096 modulation internally. The channel_type
+            is used for entity naming (sensor.cable_modem_ds_ofdm_ch_1_power).
         """
         channels = []
 
@@ -210,7 +217,8 @@ class [Manufacturer][Model]Parser(ModemParser):
             - channel_id: Channel identifier (string)
             - frequency: Frequency in Hz (int)
             - power: Power level in dBmV (float)
-            - modulation: Modulation type (string)
+            - modulation: Modulation type (string, e.g., "64QAM", "ATDMA")
+            - channel_type: Channel technology - "atdma" or "ofdma" (REQUIRED for DOCSIS 3.1)
             - symbol_rate: Symbol rate in Ksym/sec (int)
         """
         channels = []

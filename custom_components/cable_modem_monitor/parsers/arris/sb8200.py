@@ -204,10 +204,15 @@ class ArrisSB8200Parser(ModemParser):
                 freq_text = cells[3].text.strip()
                 freq_hz = extract_number(freq_text)
 
+                # SB8200 uses "Other" for OFDM downstream modulation
+                is_ofdm = modulation == "Other"
+                channel_type = "ofdm" if is_ofdm else "qam"
+
                 channel: dict[str, Any] = {
                     "channel_id": channel_id,
                     "lock_status": cells[1].text.strip(),
                     "modulation": modulation,
+                    "channel_type": channel_type,
                     "frequency": freq_hz,
                     "power": extract_float(cells[4].text),
                     "snr": extract_float(cells[5].text),
@@ -216,7 +221,7 @@ class ArrisSB8200Parser(ModemParser):
                 }
 
                 # Mark OFDM channels (modulation is "Other" for OFDM downstream)
-                if modulation == "Other":
+                if is_ofdm:
                     channel["is_ofdm"] = True
 
                 channels.append(channel)

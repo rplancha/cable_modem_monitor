@@ -118,6 +118,7 @@ class TestSB8200DownstreamParsing:
         assert first_ds["channel_id"] == "19"
         assert first_ds["frequency"] == 435000000  # 435 MHz
         assert first_ds["modulation"] == "QAM256"
+        assert first_ds["channel_type"] == "qam"  # Derived from modulation
         assert first_ds["power"] == 5.5
         assert first_ds["snr"] == 43.3
         assert first_ds["corrected"] == 158
@@ -137,6 +138,7 @@ class TestSB8200DownstreamParsing:
         assert ofdm["channel_id"] == "33"
         assert ofdm["frequency"] == 524000000  # 524 MHz
         assert ofdm.get("is_ofdm") is True
+        assert ofdm["channel_type"] == "ofdm"  # Derived from modulation="Other" (issue #87)
         assert ofdm["power"] == 6.3
         assert ofdm["snr"] == 41.8
 
