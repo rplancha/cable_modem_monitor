@@ -262,3 +262,165 @@ def https_self_signed_server(test_certs) -> Generator[MockServer, None, None]:
     server.start()
     yield server
     server.stop()
+
+
+# =============================================================================
+# SB8200 Auth Mock Server
+# =============================================================================
+
+# Load SB8200 fixture HTML
+_SB8200_FIXTURE_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "parsers",
+    "arris",
+    "fixtures",
+    "sb8200",
+    "cmconnectionstatus.html",
+)
+
+
+def _load_sb8200_fixture() -> bytes:
+    """Load SB8200 fixture HTML."""
+    # Use Windows-1252 encoding (fixture has copyright symbol)
+    with open(_SB8200_FIXTURE_PATH, encoding="cp1252") as f:
+        return f.read().encode("utf-8")
+
+
+class SB8200MockHandler(BaseHTTPRequestHandler):
+    """Mock SB8200 modem with configurable auth modes.
+
+    Class attributes control behavior:
+        require_auth: If True, requires URL-based auth (Travis's variant)
+        valid_credentials: Expected "user:password" string
+    """
+
+    require_auth = False
+    valid_credentials = "admin:password"
+    _fixture_html: bytes | None = None
+
+    def log_message(self, format, *args):
+        """Suppress logging during tests."""
+        pass
+
+    @classmethod
+    def get_fixture_html(cls) -> bytes:
+        """Lazy-load and cache fixture HTML."""
+        if cls._fixture_html is None:
+            cls._fixture_html = _load_sb8200_fixture()
+        return cls._fixture_html
+
+    def do_GET(self) -> None:  # noqa: N802
+        """Handle GET requests with optional auth."""
+        import base64
+
+        # No-auth mode (Tim's variant) - serve pages directly
+        if not self.require_auth:
+            self._serve_status_page()
+            return
+
+        # Auth mode (Travis's variant)
+        if "login_" in self.path:
+            # Extract and validate base64 credentials from URL
+            try:
+                token = self.path.split("login_")[1].split("&")[0].split("?")[0]
+                decoded = base64.b64decode(token).decode("utf-8")
+                if decoded == self.valid_credentials:
+                    self._serve_status_page()
+                    return
+            except Exception:
+                pass
+            self._send_401()
+        elif self.path == "/" or self.path == "":
+            # Root page - serve login page (or minimal response for detection)
+            self._serve_login_page()
+        else:
+            # Any other page without auth - 401
+            self._send_401()
+
+    def _serve_status_page(self) -> None:
+        """Serve the SB8200 status page fixture."""
+        content = self.get_fixture_html()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _serve_login_page(self) -> None:
+        """Serve minimal login page with model detection span."""
+        content = b"""<!DOCTYPE html>
+<html><head><title>Login</title></head>
+<body>
+<span id="thisModelNumberIs">SB8200</span>
+<form action="">
+<input type="text" id="username" name="username">
+<input type="password" id="password" name="password">
+<input type="button" id="loginButton" value="Login">
+</form>
+</body></html>"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _send_401(self) -> None:
+        """Send 401 Unauthorized response."""
+        content = b"Unauthorized"
+        self.send_response(401)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+
+@pytest.fixture
+def sb8200_server_noauth() -> Generator[MockServer, None, None]:
+    """Provide SB8200 mock server without auth (Tim's variant).
+
+    This simulates older firmware that doesn't require login.
+    """
+    SB8200MockHandler.require_auth = False
+    port = _find_free_port()
+    server = MockServer(port=port, ssl_context=None, handler_class=SB8200MockHandler)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture
+def sb8200_server_auth() -> Generator[MockServer, None, None]:
+    """Provide SB8200 mock server with URL-based auth (Travis's variant).
+
+    This simulates newer firmware that requires login via URL query param:
+    /cmconnectionstatus.html?login_<base64(user:pass)>
+    """
+    SB8200MockHandler.require_auth = True
+    SB8200MockHandler.valid_credentials = "admin:password"
+    port = _find_free_port()
+    server = MockServer(port=port, ssl_context=None, handler_class=SB8200MockHandler)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture
+def sb8200_server_auth_https(test_certs) -> Generator[MockServer, None, None]:
+    """Provide SB8200 mock server with HTTPS + auth (full Travis scenario).
+
+    This simulates the complete scenario: HTTPS with self-signed cert + auth.
+    """
+    SB8200MockHandler.require_auth = True
+    SB8200MockHandler.valid_credentials = "admin:password"
+
+    cert_path, key_path = test_certs
+    port = _find_free_port()
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert_path, key_path)
+
+    server = MockServer(port=port, ssl_context=context, handler_class=SB8200MockHandler)
+    server.start()
+    yield server
+    server.stop()

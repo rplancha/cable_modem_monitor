@@ -905,6 +905,11 @@ class ModemScraper:
             self.session = CapturingSession(self._capture_response)
             # Copy SSL verification settings to capturing session
             self.session.verify = original_session.verify
+            # Copy legacy SSL adapter if needed (fixes capture for older modem firmware)
+            if self.legacy_ssl and self.base_url.startswith("https://"):
+                from .ssl_adapter import LegacySSLAdapter
+
+                self.session.mount("https://", LegacySSLAdapter())
             _LOGGER.debug("Enabled HTML capture mode with CapturingSession")
 
         try:

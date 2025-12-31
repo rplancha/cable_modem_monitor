@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 from typing import Any
@@ -21,7 +22,15 @@ class ArrisSB8200Parser(ModemParser):
     """Parser for ARRIS SB8200 cable modem.
 
     DOCSIS 3.1 modem with 32x8 channels plus OFDM.
-    No authentication required - status page is public.
+
+    Known firmware variants:
+    - Some variants (e.g., Spectrum): HTTP, no auth required
+    - Other variants: HTTPS with self-signed cert, URL-based auth
+
+    Auth mechanism (when required):
+    - Credentials are base64-encoded as "username:password"
+    - Appended to URL: /cmconnectionstatus.html?login_<base64_token>
+    - Default credentials: admin / last 8 chars of serial number
     """
 
     name = "ARRIS SB8200"
@@ -62,8 +71,58 @@ class ArrisSB8200Parser(ModemParser):
     }
 
     def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """ARRIS SB8200 does not require authentication."""
-        return (True, None)
+        """Authenticate to ARRIS SB8200.
+
+        Behavior is credential-driven:
+        - No credentials provided: Assumes no-auth variant, returns success
+        - Credentials provided: Uses URL-based auth with base64 token
+
+        Args:
+            session: requests.Session object
+            base_url: Modem base URL (e.g., "https://192.168.100.1")
+            username: Username (typically "admin")
+            password: Password (typically last 8 chars of serial number)
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        # No credentials provided - assume no-auth firmware variant
+        if not username or not password:
+            _LOGGER.debug("SB8200: No credentials provided, assuming no-auth variant")
+            return (True, None)
+
+        # Credentials provided - use URL-based auth for newer firmware
+        try:
+            # Build auth token: base64(username:password)
+            credentials = f"{username}:{password}"
+            token = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
+
+            # Build authenticated URL
+            auth_url = f"{base_url}/cmconnectionstatus.html?login_{token}"
+            _LOGGER.debug("SB8200: Attempting URL-based auth to %s", base_url)
+
+            # Attempt authenticated request
+            response = session.get(auth_url, timeout=10, verify=False)
+
+            if response.status_code == 200:
+                # Check if we got actual content (not a login page)
+                if "Downstream Bonded Channels" in response.text:
+                    _LOGGER.info("SB8200: Authentication successful")
+                    return (True, None)
+                # Got 200 but no channel data - might be login page
+                _LOGGER.warning("SB8200: Got 200 but no channel data, auth may have failed")
+                return (True, None)  # Still return success to allow detection
+
+            if response.status_code == 401:
+                _LOGGER.warning("SB8200: Authentication failed (401 Unauthorized)")
+                return (False, "Invalid credentials (401 Unauthorized)")
+
+            _LOGGER.warning("SB8200: Unexpected status code %d", response.status_code)
+            return (False, f"Authentication failed with status {response.status_code}")
+
+        except Exception as e:
+            _LOGGER.error("SB8200: Authentication error: %s", e)
+            return (False, f"Authentication error: {e}")
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the modem."""

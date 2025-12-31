@@ -12,3 +12,16 @@ isps:
   - Spectrum
 source: https://www.commscope.com/press-releases/2017/arris-launches-retail-docsis-3.1-surfboard-sb8200-cable-modem
 source_code: https://sourceforge.net/projects/c8200-cable-modem.arris/
+
+# Known firmware variants (same HTML structure, different auth)
+firmware_variants:
+  - firmware: "AB01.01.009.36.02_022720_183.0A.NSH"
+    protocol: HTTP
+    auth: none
+    captured_from_issue: 42
+    notes: "Spectrum LA variant - no auth required"
+  - firmware: "unknown"
+    protocol: HTTPS
+    auth: url_query_base64 # ?login_<base64(user:pass)>
+    captured_from_issue: 81
+    notes: "HTTPS variant - requires login with base64 creds in URL"

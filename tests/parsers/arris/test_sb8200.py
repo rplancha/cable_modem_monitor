@@ -209,12 +209,18 @@ class TestSB8200SystemInfo:
 
 
 class TestSB8200Login:
-    """Test login behavior."""
+    """Test login behavior - unit tests without network."""
 
-    def test_login_always_succeeds(self):
-        """Test that login always returns (True, None) (no auth required)."""
+    def test_login_no_credentials_succeeds(self):
+        """Test that login with no credentials returns (True, None)."""
         parser = ArrisSB8200Parser()
         result = parser.login(None, "http://192.168.100.1", None, None)
+        assert result == (True, None)
+
+    def test_login_empty_credentials_succeeds(self):
+        """Test that login with empty string credentials returns (True, None)."""
+        parser = ArrisSB8200Parser()
+        result = parser.login(None, "http://192.168.100.1", "", "")
         assert result == (True, None)
 
 
@@ -313,3 +319,6 @@ class TestSB8200UptimeParsing:
         parser = ArrisSB8200Parser()
         result = parser._parse_uptime("")
         assert result is None
+
+
+# Note: Integration tests for auth are in tests/integration/test_sb8200_auth.py
