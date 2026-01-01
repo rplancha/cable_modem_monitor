@@ -29,6 +29,7 @@ from .configs import (
     HNAPAuthConfig,
     NoAuthConfig,
     RedirectFormAuthConfig,
+    UrlTokenSessionConfig,
 )
 
 # Factory
@@ -46,6 +47,7 @@ from .strategies import (
     HNAPSessionAuthStrategy,
     NoAuthStrategy,
     RedirectFormAuthStrategy,
+    UrlTokenSessionStrategy,
 )
 
 # Types and enums
@@ -61,6 +63,7 @@ __all__ = [
     "HNAPAuthConfig",
     "NoAuthConfig",
     "RedirectFormAuthConfig",
+    "UrlTokenSessionConfig",
     # Base
     "AuthResult",
     "AuthStrategy",
@@ -74,6 +77,7 @@ __all__ = [
     "HNAPSessionAuthStrategy",
     "NoAuthStrategy",
     "RedirectFormAuthStrategy",
+    "UrlTokenSessionStrategy",
     # HNAP
     "HNAPJsonRequestBuilder",
     "HNAPRequestBuilder",

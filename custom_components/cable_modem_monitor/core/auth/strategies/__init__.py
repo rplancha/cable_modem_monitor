@@ -9,6 +9,7 @@ from .form_plain import FormPlainAuthStrategy
 from .hnap_session import HNAPSessionAuthStrategy
 from .no_auth import NoAuthStrategy
 from .redirect_form import RedirectFormAuthStrategy
+from .url_token_session import UrlTokenSessionStrategy
 
 __all__ = [
     "BasicHttpAuthStrategy",
@@ -18,4 +19,5 @@ __all__ = [
     "HNAPSessionAuthStrategy",
     "NoAuthStrategy",
     "RedirectFormAuthStrategy",
+    "UrlTokenSessionStrategy",
 ]

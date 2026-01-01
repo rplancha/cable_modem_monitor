@@ -34,6 +34,7 @@ class AuthFactory:
         from .strategies.hnap_session import HNAPSessionAuthStrategy
         from .strategies.no_auth import NoAuthStrategy
         from .strategies.redirect_form import RedirectFormAuthStrategy
+        from .strategies.url_token_session import UrlTokenSessionStrategy
 
         _strategies = {
             AuthStrategyType.NO_AUTH: NoAuthStrategy,
@@ -43,6 +44,7 @@ class AuthFactory:
             AuthStrategyType.FORM_PLAIN_AND_BASE64: FormPlainAndBase64AuthStrategy,
             AuthStrategyType.REDIRECT_FORM: RedirectFormAuthStrategy,
             AuthStrategyType.HNAP_SESSION: HNAPSessionAuthStrategy,
+            AuthStrategyType.URL_TOKEN_SESSION: UrlTokenSessionStrategy,
         }
 
         if strategy_type not in _strategies:

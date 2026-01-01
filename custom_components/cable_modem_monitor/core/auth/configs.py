@@ -61,3 +61,23 @@ class HNAPAuthConfig(AuthConfig):
     hnap_endpoint: str = "/HNAP1/"
     session_timeout_indicator: str = "UN-AUTH"
     soap_action_namespace: str = "http://purenetworks.com/HNAP1/"
+
+
+@dataclass
+class UrlTokenSessionConfig(AuthConfig):
+    """URL-based token auth with session cookie (e.g., ARRIS SB8200 HTTPS).
+
+    Auth flow:
+    1. Login: GET {base_url}{login_page}?{login_prefix}{base64(user:pass)}
+       with Authorization: Basic {base64(user:pass)} header
+    2. Response sets {session_cookie_name} cookie
+    3. Subsequent requests: GET {url}?{token_prefix}{session_cookie_value}
+    """
+
+    strategy: AuthStrategyType = AuthStrategyType.URL_TOKEN_SESSION
+    login_page: str = "/cmconnectionstatus.html"
+    data_page: str = "/cmconnectionstatus.html"
+    login_prefix: str = "login_"
+    token_prefix: str = "ct_"
+    session_cookie_name: str = "sessionId"
+    success_indicator: str = "Downstream Bonded Channels"

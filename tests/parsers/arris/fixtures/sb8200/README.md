@@ -25,8 +25,8 @@
 | **Release Year** | 2017 |
 | **ISPs** | Comcast, Xfinity, Cox, Spectrum, and most major ISPs |
 | **Max Speed** | 2 Gbps downstream (with LAG) |
-| **Related Issue** | [#42](https://github.com/solentlabs/cable_modem_monitor/issues/42) |
-| **Contributor** | @undotcom |
+| **Related Issues** | [#42](https://github.com/solentlabs/cable_modem_monitor/issues/42), [#81](https://github.com/solentlabs/cable_modem_monitor/issues/81) |
+| **Contributors** | @undotcom (HTTP), @ctravis8892 (HTTPS) |
 | **Capture Date** | November 2025 |
 | **Parser Status** | Verified |
 
@@ -44,13 +44,45 @@ Complete page inventory from `main_arris.js` menu structure:
 | ADVANCED | `/lagcfg.html` | ✅ Captured | Link aggregation settings |
 | HELP | `/cmstatushelp.html` | ✅ Captured | Status page documentation |
 
-**Base URL:** `http://192.168.100.1`
+**Base URL:** `http://192.168.100.1` (HTTP variant) or `https://192.168.100.1` (HTTPS variant)
 
-## Authentication
+## Firmware Variants
 
-**Type:** None required
+The SB8200 has two known firmware variants with different authentication requirements:
 
-The SB8200 status pages are publicly accessible without authentication.
+| Variant | Protocol | Authentication | Related Issue |
+|---------|----------|----------------|---------------|
+| HTTP | `http://` | None required | [#42](https://github.com/solentlabs/cable_modem_monitor/issues/42) |
+| HTTPS | `https://` | URL Token Session | [#81](https://github.com/solentlabs/cable_modem_monitor/issues/81) |
+
+### HTTP Variant (No Auth)
+
+The original firmware variant serves pages over HTTP without authentication. Status pages are publicly accessible without credentials.
+
+### HTTPS Variant (Token Session Auth)
+
+Newer firmware variants require HTTPS and authentication:
+
+1. **Login Request:** `GET /cmconnectionstatus.html?login_<base64_token>`
+   - Token format: `base64(username:password)`
+   - Includes `Authorization: Basic <token>` header
+   - Response sets `sessionId` cookie
+
+2. **Data Requests:** `GET /cmconnectionstatus.html?ct_<sessionId>`
+   - Uses session ID from cookie for subsequent requests
+
+**Default Credentials:**
+- **Username:** `admin`
+- **Password:** Last 8 characters of modem serial number (found on modem label)
+
+### Parser Behavior
+
+The SB8200 parser handles both variants automatically:
+- If no credentials provided: Assumes HTTP variant, fetches without auth
+- If credentials provided: Uses URL Token Session auth strategy
+- If HTTPS auth fails (non-401): Falls back to unauthenticated fetch (some HTTPS firmwares may not require auth)
+
+The parser tracks which auth variant was used and includes it in diagnostics output.
 
 ## Reboot Capability
 
@@ -98,4 +130,5 @@ Reference files not used by parser but useful for documentation:
 
 ## Related Issues
 
-- **Issue #42:** ARRIS SB8200 support request (@undotcom)
+- **Issue #42:** ARRIS SB8200 support request - HTTP variant (@undotcom)
+- **Issue #81:** ARRIS SB8200 HTTPS authentication - HTTPS variant (@ctravis8892)

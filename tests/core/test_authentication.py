@@ -19,6 +19,8 @@ from custom_components.cable_modem_monitor.core.auth import (
     NoAuthStrategy,
     RedirectFormAuthConfig,
     RedirectFormAuthStrategy,
+    UrlTokenSessionConfig,
+    UrlTokenSessionStrategy,
 )
 
 
@@ -696,6 +698,7 @@ class TestAuthStrategyFactoryPattern:
             FormPlainAndBase64AuthStrategy,
             RedirectFormAuthStrategy,
             HNAPSessionAuthStrategy,
+            UrlTokenSessionStrategy,
         ],
     )
     def test_all_strategies_have_login_method(self, strategy_class):
@@ -704,3 +707,132 @@ class TestAuthStrategyFactoryPattern:
 
         assert hasattr(strategy, "login")
         assert callable(strategy.login)
+
+
+class TestUrlTokenSessionStrategy:
+    """Test UrlTokenSessionStrategy (e.g., ARRIS SB8200 HTTPS variant)."""
+
+    @pytest.fixture
+    def url_token_config(self):
+        """Create URL token session config."""
+        return UrlTokenSessionConfig(
+            strategy=AuthStrategyType.URL_TOKEN_SESSION,
+            login_page="/cmconnectionstatus.html",
+            data_page="/cmconnectionstatus.html",
+            login_prefix="login_",
+            token_prefix="ct_",
+            session_cookie_name="sessionId",
+            success_indicator="Downstream Bonded Channels",
+        )
+
+    def test_no_credentials_skips_auth(self, mock_session, url_token_config):
+        """Test that missing credentials skips auth."""
+        strategy = UrlTokenSessionStrategy()
+
+        success, response = strategy.login(mock_session, "https://192.168.100.1", None, None, url_token_config)
+
+        assert success is True
+        assert response is None
+        mock_session.get.assert_not_called()
+
+    def test_empty_credentials_skips_auth(self, mock_session, url_token_config):
+        """Test that empty credentials skips auth."""
+        strategy = UrlTokenSessionStrategy()
+
+        success, response = strategy.login(mock_session, "https://192.168.100.1", "", "", url_token_config)
+
+        assert success is True
+        assert response is None
+        mock_session.get.assert_not_called()
+
+    def test_login_url_contains_base64_token(self, mock_session, url_token_config):
+        """Test that login URL contains base64-encoded credentials."""
+        import base64
+
+        strategy = UrlTokenSessionStrategy()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "Downstream Bonded Channels data here"
+        mock_session.get.return_value = mock_response
+
+        strategy.login(mock_session, "https://192.168.100.1", "admin", "password", url_token_config)
+
+        # Check that the login URL contains the base64 token
+        expected_token = base64.b64encode(b"admin:password").decode("utf-8")
+        call_url = mock_session.get.call_args[0][0]
+        assert f"login_{expected_token}" in call_url
+
+    def test_login_includes_authorization_header(self, mock_session, url_token_config):
+        """Test that login request includes Authorization header."""
+        import base64
+
+        strategy = UrlTokenSessionStrategy()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "Downstream Bonded Channels data here"
+        mock_session.get.return_value = mock_response
+
+        strategy.login(mock_session, "https://192.168.100.1", "admin", "password", url_token_config)
+
+        # Check that Authorization header was included
+        expected_token = base64.b64encode(b"admin:password").decode("utf-8")
+        call_kwargs = mock_session.get.call_args[1]
+        assert "headers" in call_kwargs
+        assert call_kwargs["headers"]["Authorization"] == f"Basic {expected_token}"
+
+    def test_success_when_data_in_login_response(self, mock_session, url_token_config):
+        """Test success when login response contains channel data."""
+        strategy = UrlTokenSessionStrategy()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html>Downstream Bonded Channels table here</html>"
+        mock_session.get.return_value = mock_response
+
+        success, response = strategy.login(mock_session, "https://192.168.100.1", "admin", "password", url_token_config)
+
+        assert success is True
+        assert response == mock_response.text
+
+    def test_fetches_data_page_with_session_token(self, url_token_config):
+        """Test that data page is fetched with session token from cookie."""
+        strategy = UrlTokenSessionStrategy()
+
+        # Create session with cookies mock
+        session = MagicMock(spec=requests.Session)
+        session.cookies = MagicMock()
+        session.cookies.get.return_value = "test_session_id_123"
+
+        # First response (login) - no channel data, sets cookie
+        login_response = MagicMock()
+        login_response.status_code = 200
+        login_response.text = ""  # Empty body
+
+        # Second response (data page) - has channel data
+        data_response = MagicMock()
+        data_response.status_code = 200
+        data_response.text = "<html>Downstream Bonded Channels</html>"
+
+        session.get.side_effect = [login_response, data_response]
+
+        success, response = strategy.login(session, "https://192.168.100.1", "admin", "password", url_token_config)
+
+        assert success is True
+        assert response == data_response.text
+
+        # Verify second call used session token
+        second_call_url = session.get.call_args_list[1][0][0]
+        assert "ct_test_session_id_123" in second_call_url
+
+    def test_401_returns_failure(self, mock_session, url_token_config):
+        """Test that 401 response returns failure."""
+        strategy = UrlTokenSessionStrategy()
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_session.get.return_value = mock_response
+
+        success, response = strategy.login(
+            mock_session, "https://192.168.100.1", "admin", "wrong_password", url_token_config
+        )
+
+        assert success is False
+        assert "401" in str(response)

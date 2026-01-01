@@ -323,4 +323,386 @@ class TestSB8200UptimeParsing:
         assert result is None
 
 
+class TestSB8200AuthConfig:
+    """Test authentication configuration."""
+
+    def test_auth_config_type(self):
+        """Test that auth config uses URL_TOKEN_SESSION strategy."""
+        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType
+
+        assert ArrisSB8200Parser.auth_config.strategy == AuthStrategyType.URL_TOKEN_SESSION
+
+    def test_auth_config_defaults(self):
+        """Test auth config has correct defaults for SB8200."""
+        config = ArrisSB8200Parser.auth_config
+        assert config.login_page == "/cmconnectionstatus.html"
+        assert config.data_page == "/cmconnectionstatus.html"
+        assert config.login_prefix == "login_"
+        assert config.token_prefix == "ct_"
+        assert config.session_cookie_name == "sessionId"
+        assert config.success_indicator == "Downstream Bonded Channels"
+
+
+class TestSB8200AuthenticatedUrls:
+    """Test authenticated URL building."""
+
+    def test_build_url_without_session_token(self):
+        """Test URL building when no session token is set."""
+        parser = ArrisSB8200Parser()
+        url = parser._build_authenticated_url("https://192.168.100.1", "/cmswinfo.html")
+        assert url == "https://192.168.100.1/cmswinfo.html"
+
+    def test_build_url_with_session_token(self):
+        """Test URL building when session token is set."""
+        parser = ArrisSB8200Parser()
+        parser._session_token = "testtoken123"
+        url = parser._build_authenticated_url("https://192.168.100.1", "/cmswinfo.html")
+        assert url == "https://192.168.100.1/cmswinfo.html?ct_testtoken123"
+
+
+class TestSB8200VariantTracking:
+    """Test auth variant tracking for diagnostics."""
+
+    def test_no_credentials_sets_http_variant(self):
+        """Test that no credentials sets HTTP no-auth variant."""
+        parser = ArrisSB8200Parser()
+        success, _ = parser.login(None, "http://192.168.100.1", None, None)
+
+        assert success is True
+        assert parser._auth_variant == ArrisSB8200Parser.VARIANT_HTTP_NO_AUTH
+
+    def test_no_credentials_https_sets_http_variant_with_warning(self):
+        """Test that no credentials on HTTPS still sets HTTP variant (with warning)."""
+        parser = ArrisSB8200Parser()
+        success, _ = parser.login(None, "https://192.168.100.1", None, None)
+
+        assert success is True
+        assert parser._auth_variant == ArrisSB8200Parser.VARIANT_HTTP_NO_AUTH
+
+    def test_variant_constants_defined(self):
+        """Test that all variant constants are defined."""
+        assert ArrisSB8200Parser.VARIANT_HTTP_NO_AUTH == "http_no_auth"
+        assert ArrisSB8200Parser.VARIANT_HTTPS_TOKEN_SESSION == "https_token_session"
+        assert ArrisSB8200Parser.VARIANT_HTTPS_NO_AUTH_FALLBACK == "https_no_auth_fallback"
+
+
+class TestSB8200AuthVariantInDiagnostics:
+    """Test auth variant appears in parsed output."""
+
+    def test_auth_variant_in_system_info(self, sb8200_html):
+        """Test that auth variant is included in system_info."""
+        parser = ArrisSB8200Parser()
+        # Set variant as if login was called
+        parser._auth_variant = ArrisSB8200Parser.VARIANT_HTTP_NO_AUTH
+
+        soup = BeautifulSoup(sb8200_html, "html.parser")
+        data = parser.parse(soup)
+
+        assert "auth_variant" in data["system_info"]
+        assert data["system_info"]["auth_variant"] == "http_no_auth"
+
+    def test_no_auth_variant_when_not_set(self, sb8200_html):
+        """Test that auth_variant is not in system_info if not set."""
+        parser = ArrisSB8200Parser()
+        # Don't set _auth_variant
+
+        soup = BeautifulSoup(sb8200_html, "html.parser")
+        data = parser.parse(soup)
+
+        # Should not be present if not set
+        assert parser._auth_variant is None
+        assert "auth_variant" not in data["system_info"]
+
+
+class TestSB8200UnauthenticatedFallback:
+    """Test unauthenticated fallback behavior."""
+
+    def test_fallback_method_exists(self):
+        """Test that unauthenticated fallback method exists."""
+        parser = ArrisSB8200Parser()
+        assert hasattr(parser, "_try_unauthenticated_fetch")
+        assert callable(parser._try_unauthenticated_fetch)
+
+    def test_fallback_returns_none_on_failure(self):
+        """Test that fallback returns None when fetch fails."""
+        from unittest.mock import MagicMock
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.get.side_effect = Exception("Connection failed")
+
+        result = parser._try_unauthenticated_fetch(mock_session, "https://192.168.100.1")
+
+        assert result is None
+
+    def test_fallback_returns_none_when_no_channel_data(self):
+        """Test that fallback returns None when response lacks channel data."""
+        from unittest.mock import MagicMock
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html>Login page</html>"  # No channel data
+        mock_session.get.return_value = mock_response
+
+        result = parser._try_unauthenticated_fetch(mock_session, "https://192.168.100.1")
+
+        assert result is None
+
+    def test_fallback_returns_html_when_successful(self):
+        """Test that fallback returns HTML when channel data found."""
+        from unittest.mock import MagicMock
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html>Downstream Bonded Channels data</html>"
+        mock_session.get.return_value = mock_response
+
+        result = parser._try_unauthenticated_fetch(mock_session, "https://192.168.100.1")
+
+        assert result == mock_response.text
+
+
+class TestSB8200HttpsAuthFlow:
+    """Test HTTPS authentication flow with credentials."""
+
+    def test_login_with_credentials_uses_auth_strategy(self):
+        """Test that login with credentials calls the auth strategy."""
+        from unittest.mock import MagicMock, patch
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.cookies.get.return_value = "session123"
+
+        with patch("custom_components.cable_modem_monitor.parsers.arris.sb8200.AuthFactory") as mock_factory:
+            mock_strategy = MagicMock()
+            mock_strategy.login.return_value = (True, "<html>Downstream Bonded Channels</html>")
+            mock_factory.get_strategy.return_value = mock_strategy
+
+            success, html = parser.login(mock_session, "https://192.168.100.1", "admin", "password123")
+
+            # Verify AuthFactory was called with correct strategy type
+            from custom_components.cable_modem_monitor.core.auth import AuthStrategyType
+
+            mock_factory.get_strategy.assert_called_once_with(AuthStrategyType.URL_TOKEN_SESSION)
+            # Verify strategy.login was called
+            mock_strategy.login.assert_called_once()
+            assert success is True
+            assert html is not None
+            assert "Downstream Bonded Channels" in html
+
+    def test_login_success_stores_session_token(self):
+        """Test that successful login stores the session token."""
+        from unittest.mock import MagicMock, patch
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.cookies.get.return_value = "stored_token_abc123"
+
+        with patch("custom_components.cable_modem_monitor.parsers.arris.sb8200.AuthFactory") as mock_factory:
+            mock_strategy = MagicMock()
+            mock_strategy.login.return_value = (True, "<html>Downstream Bonded Channels</html>")
+            mock_factory.get_strategy.return_value = mock_strategy
+
+            parser.login(mock_session, "https://192.168.100.1", "admin", "password")
+
+            # Verify session token was stored
+            assert parser._session_token == "stored_token_abc123"
+            mock_session.cookies.get.assert_called_with("sessionId")
+
+    def test_login_success_sets_https_variant(self):
+        """Test that successful HTTPS login sets the correct variant."""
+        from unittest.mock import MagicMock, patch
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.cookies.get.return_value = "token123"
+
+        with patch("custom_components.cable_modem_monitor.parsers.arris.sb8200.AuthFactory") as mock_factory:
+            mock_strategy = MagicMock()
+            mock_strategy.login.return_value = (True, "<html>Downstream Bonded Channels</html>")
+            mock_factory.get_strategy.return_value = mock_strategy
+
+            parser.login(mock_session, "https://192.168.100.1", "admin", "password")
+
+            assert parser._auth_variant == ArrisSB8200Parser.VARIANT_HTTPS_TOKEN_SESSION
+
+    def test_login_failure_triggers_fallback(self):
+        """Test that auth failure triggers unauthenticated fallback."""
+        from unittest.mock import MagicMock, patch
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.cookies.get.return_value = None
+
+        # Mock auth strategy to fail (but not with 401)
+        with patch("custom_components.cable_modem_monitor.parsers.arris.sb8200.AuthFactory") as mock_factory:
+            mock_strategy = MagicMock()
+            mock_strategy.login.return_value = (False, "Connection error")
+            mock_factory.get_strategy.return_value = mock_strategy
+
+            # Mock fallback to succeed
+            with patch.object(parser, "_try_unauthenticated_fetch") as mock_fallback:
+                mock_fallback.return_value = "<html>Downstream Bonded Channels data</html>"
+
+                success, html = parser.login(mock_session, "https://192.168.100.1", "admin", "password")
+
+                # Fallback should have been called
+                mock_fallback.assert_called_once_with(mock_session, "https://192.168.100.1")
+                assert success is True
+                assert html is not None
+                assert "Downstream Bonded Channels" in html
+
+    def test_login_failure_fallback_sets_variant(self):
+        """Test that successful fallback sets the fallback variant."""
+        from unittest.mock import MagicMock, patch
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.cookies.get.return_value = None
+
+        with patch("custom_components.cable_modem_monitor.parsers.arris.sb8200.AuthFactory") as mock_factory:
+            mock_strategy = MagicMock()
+            mock_strategy.login.return_value = (False, "Auth failed")
+            mock_factory.get_strategy.return_value = mock_strategy
+
+            with patch.object(parser, "_try_unauthenticated_fetch") as mock_fallback:
+                mock_fallback.return_value = "<html>Downstream Bonded Channels</html>"
+
+                parser.login(mock_session, "https://192.168.100.1", "admin", "password")
+
+                assert parser._auth_variant == ArrisSB8200Parser.VARIANT_HTTPS_NO_AUTH_FALLBACK
+
+    def test_login_401_does_not_fallback(self):
+        """Test that 401 error does not trigger fallback (indicates wrong creds)."""
+        from unittest.mock import MagicMock, patch
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.cookies.get.return_value = None
+
+        with patch("custom_components.cable_modem_monitor.parsers.arris.sb8200.AuthFactory") as mock_factory:
+            mock_strategy = MagicMock()
+            # 401 in the response message indicates auth rejection
+            mock_strategy.login.return_value = (False, "401 Unauthorized")
+            mock_factory.get_strategy.return_value = mock_strategy
+
+            with patch.object(parser, "_try_unauthenticated_fetch") as mock_fallback:
+                success, response = parser.login(mock_session, "https://192.168.100.1", "admin", "wrongpassword")
+
+                # Fallback should NOT be called for 401
+                mock_fallback.assert_not_called()
+                assert success is False
+                assert response is not None
+                assert "401" in response
+
+    def test_login_failure_fallback_fails_returns_original_error(self):
+        """Test that when fallback also fails, original error is returned."""
+        from unittest.mock import MagicMock, patch
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.cookies = MagicMock()
+        mock_session.cookies.get.return_value = None
+
+        with patch("custom_components.cable_modem_monitor.parsers.arris.sb8200.AuthFactory") as mock_factory:
+            mock_strategy = MagicMock()
+            mock_strategy.login.return_value = (False, "Network timeout")
+            mock_factory.get_strategy.return_value = mock_strategy
+
+            with patch.object(parser, "_try_unauthenticated_fetch") as mock_fallback:
+                mock_fallback.return_value = None  # Fallback fails
+
+                success, response = parser.login(mock_session, "https://192.168.100.1", "admin", "password")
+
+                assert success is False
+                assert response == "Network timeout"
+
+
+class TestSB8200MultiPageFetch:
+    """Test multi-page fetch in parse() method."""
+
+    def test_parse_fetches_product_info_when_session_provided(self, sb8200_html, sb8200_product_info_html):
+        """Test that parse() fetches cmswinfo.html when session is available."""
+        from unittest.mock import MagicMock
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = sb8200_product_info_html
+        mock_session.get.return_value = mock_response
+
+        soup = BeautifulSoup(sb8200_html, "html.parser")
+        data = parser.parse(soup, session=mock_session, base_url="https://192.168.100.1")
+
+        # Verify session.get was called for cmswinfo.html
+        mock_session.get.assert_called_once()
+        call_args = mock_session.get.call_args
+        assert "/cmswinfo.html" in call_args[0][0]
+
+        # Verify product info was merged
+        assert "system_uptime" in data["system_info"]
+        assert "hardware_version" in data["system_info"]
+        assert "software_version" in data["system_info"]
+
+    def test_parse_uses_session_token_for_product_info(self, sb8200_html, sb8200_product_info_html):
+        """Test that parse() uses session token when fetching cmswinfo.html."""
+        from unittest.mock import MagicMock
+
+        parser = ArrisSB8200Parser()
+        parser._session_token = "mytoken456"
+
+        mock_session = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = sb8200_product_info_html
+        mock_session.get.return_value = mock_response
+
+        soup = BeautifulSoup(sb8200_html, "html.parser")
+        parser.parse(soup, session=mock_session, base_url="https://192.168.100.1")
+
+        # Verify URL contains the session token
+        call_args = mock_session.get.call_args
+        assert "ct_mytoken456" in call_args[0][0]
+
+    def test_parse_handles_product_info_fetch_failure(self, sb8200_html):
+        """Test that parse() continues gracefully if cmswinfo.html fetch fails."""
+        from unittest.mock import MagicMock
+
+        parser = ArrisSB8200Parser()
+        mock_session = MagicMock()
+        mock_session.get.side_effect = Exception("Connection refused")
+
+        soup = BeautifulSoup(sb8200_html, "html.parser")
+        data = parser.parse(soup, session=mock_session, base_url="https://192.168.100.1")
+
+        # Parse should still succeed with channel data
+        assert "downstream" in data
+        assert len(data["downstream"]) == 32
+        # Product info fields should be absent
+        assert "system_uptime" not in data.get("system_info", {})
+
+    def test_parse_without_session_skips_product_info_fetch(self, sb8200_html):
+        """Test that parse() without session doesn't try to fetch cmswinfo.html."""
+        parser = ArrisSB8200Parser()
+
+        soup = BeautifulSoup(sb8200_html, "html.parser")
+        data = parser.parse(soup)  # No session, no base_url
+
+        # Should still parse channel data
+        assert "downstream" in data
+        assert len(data["downstream"]) == 32
+
+
 # Note: Integration tests for auth are in tests/integration/test_sb8200_auth.py
+# Note: CSRF token extraction is now handled by UrlTokenSessionStrategy

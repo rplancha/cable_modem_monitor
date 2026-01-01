@@ -332,28 +332,17 @@ _Moved to Completed Items section._
 
 ---
 
-### 15. Unformalised Auth Patterns
+### 15. Unformalised Auth Patterns ✅ RESOLVED
 
-**Problem:** Some parsers implement auth logic inline in their `login()` method rather than using a formal auth strategy. This breaks the modular auth architecture.
+**Resolution:** Created `UrlTokenSessionStrategy` for SB8200 HTTPS variant (December 2025).
 
-**Known cases:**
-- SB8200: URL token auth (base64 credentials appended to URL path)
+- Added `AuthStrategyType.URL_TOKEN_SESSION` enum
+- Created `UrlTokenSessionConfig` dataclass
+- Implemented `UrlTokenSessionStrategy` class
+- Updated SB8200 parser to use auth framework
+- Added defensive variant tracking and graceful fallback
 
-**Impact:**
-- Inconsistent auth handling across parsers
-- Blocks declarative parser configuration goals (JSON configs instead of Python)
-- Auth logic duplicated if another modem uses same pattern
-
-**Remediation:**
-1. Create `UrlTokenAuthStrategy` for SB8200 pattern
-2. Audit other parsers for inline auth logic
-3. Extract any remaining patterns into formal strategies
-
-**Effort:** Low (1 session per strategy)
-
-**Files:**
-- `custom_components/cable_modem_monitor/parsers/arris/sb8200.py`
-- `custom_components/cable_modem_monitor/core/auth/strategies/`
+**Related:** Issue #81 (SB8200 HTTPS authentication)
 
 ---
 

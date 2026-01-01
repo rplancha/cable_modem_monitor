@@ -79,6 +79,7 @@ def login(self, session, base_url, username, password) -> bool:
 | `FORM_PLAIN_AND_BASE64` | `FormAuthConfig` | Try plain, fallback to base64 |
 | `REDIRECT_FORM` | `RedirectFormAuthConfig` | Form that redirects on success |
 | `HNAP_SESSION` | `HNAPAuthConfig` | Arris/Motorola HNAP protocol |
+| `URL_TOKEN_SESSION` | `UrlTokenSessionConfig` | URL-based token with session cookie (SB8200 HTTPS) |
 
 ## Auth Flow in Discovery vs Polling
 
@@ -96,13 +97,7 @@ def login(self, session, base_url, username, password) -> bool:
 
 ## Known Gaps
 
-The following auth patterns exist in parsers but are not yet formalized as strategies:
-
-| Pattern | Used By | Current Handling |
-|---------|---------|------------------|
-| URL Token Auth | SB8200 | Inline in `login()` - base64 credentials appended to URL path |
-
-These should be extracted into formal strategies to align with modularization goals. See [TECH_DEBT.md](../../../../docs/reference/TECH_DEBT.md) for tracking.
+All known authentication patterns have been formalized as strategies. If you encounter a new pattern, follow the "Adding a New Strategy" section below.
 
 ## Adding a New Strategy
 
@@ -128,7 +123,7 @@ class MyAuthStrategy(AuthStrategy):
 
 HNAP (Home Network Administration Protocol) is used by Arris and some Motorola modems. Two variants exist:
 
-- **XML-based** (`HNAPRequestBuilder`) - Used by SB8200
+- **XML-based** (`HNAPRequestBuilder`) - Legacy Arris modems
 - **JSON-based** (`HNAPJsonRequestBuilder`) - Used by S33, MB8611
 
 Both handle HMAC-MD5 challenge-response authentication. See `hnap/` subdirectory for implementation details.

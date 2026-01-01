@@ -28,3 +28,6 @@ class AuthStrategyType(Enum):
 
     HNAP_SESSION = "hnap_session"
     """HNAP/SOAP session-based authentication."""
+
+    URL_TOKEN_SESSION = "url_token_session"
+    """URL-based token auth with session cookie (e.g., ARRIS SB8200 HTTPS variant)."""
