@@ -148,12 +148,16 @@ async def _connect_to_modem(hass: HomeAssistant, scraper) -> dict[str, Any]:
         )
         raise InvalidAuthError("Received login page - please check username and password")
 
+    # Check for authentication failure
+    status = modem_data.get("cable_modem_connection_status")
+    if status == "auth_failed":
+        raise InvalidAuthError("Login failed - please check username and password")
+
     # Allow installation for various status levels:
     # - "online": Normal operation with channel data
     # - "limited": Fallback mode (unsupported modem)
     # - "parser_issue": Known parser but no channel data (bridge mode, parser bug, etc.)
     # Only reject truly offline/unreachable modems
-    status = modem_data.get("cable_modem_connection_status")
     if status in ["offline", "unreachable"]:
         raise CannotConnectError
 
@@ -409,7 +413,7 @@ def _try_auth_with_parser_hints(
     )
 
     handler = AuthHandler(strategy=strategy, form_config=form_config)
-    success, html = handler.authenticate(session, base_url, username, password)
+    success, html = handler.authenticate(session, base_url, username, password, verbose=True)
 
     if success:
         _LOGGER.info("Parser hints auth successful: strategy=%s", strategy)
@@ -1123,6 +1127,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             # Validate the connection with new settings
             try:
                 info = await validate_input(self.hass, user_input)
+            except InvalidAuthError:
+                errors["base"] = "invalid_auth"
             except UnsupportedModemError:
                 errors["base"] = "unsupported_modem"
             except CannotConnectError:

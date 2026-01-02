@@ -113,6 +113,7 @@ class AuthHandler:
         base_url: str,
         username: str | None,
         password: str | None,
+        verbose: bool = False,
     ) -> tuple[bool, str | None]:
         """Authenticate the session using the stored strategy.
 
@@ -121,6 +122,8 @@ class AuthHandler:
             base_url: Modem base URL
             username: Username for authentication
             password: Password for authentication
+            verbose: If True, log at INFO level (for config_flow discovery).
+                     If False, log at DEBUG level (for routine polling).
 
         Returns:
             tuple of (success, authenticated_html)
@@ -133,16 +136,16 @@ class AuthHandler:
             return self._handle_no_auth()
 
         if self.strategy == AuthStrategyType.BASIC_HTTP:
-            return self._handle_basic_auth(session, base_url, username, password)
+            return self._handle_basic_auth(session, base_url, username, password, verbose)
 
         if self.strategy in (AuthStrategyType.FORM_PLAIN, AuthStrategyType.FORM_BASE64):
-            return self._handle_form_auth(session, base_url, username, password)
+            return self._handle_form_auth(session, base_url, username, password, verbose)
 
         if self.strategy == AuthStrategyType.HNAP_SESSION:
-            return self._handle_hnap_auth(session, base_url, username, password)
+            return self._handle_hnap_auth(session, base_url, username, password, verbose)
 
         if self.strategy == AuthStrategyType.URL_TOKEN_SESSION:
-            return self._handle_url_token_auth(session, base_url, username, password)
+            return self._handle_url_token_auth(session, base_url, username, password, verbose)
 
         # Unknown strategy - return success to allow data fetch attempt
         _LOGGER.warning(
@@ -162,30 +165,33 @@ class AuthHandler:
         base_url: str,
         username: str | None,
         password: str | None,
+        verbose: bool = False,
     ) -> tuple[bool, str | None]:
         """Handle HTTP Basic Authentication.
 
         Sets session.auth for all subsequent requests.
         """
+        log = _LOGGER.info if verbose else _LOGGER.debug
+
         if not username or not password:
             _LOGGER.warning("Basic auth configured but no credentials provided")
             return False, None
 
         session.auth = (username, password)
-        _LOGGER.debug("Basic auth credentials set on session")
+        log("Basic auth credentials set on session")
 
         # Verify auth works by fetching base URL
         try:
             response = session.get(base_url, timeout=10)
             if response.status_code == 200:
-                _LOGGER.debug("Basic auth verified successfully")
+                log("Basic auth verified successfully")
                 return True, response.text
             elif response.status_code == 401:
                 _LOGGER.warning("Basic auth failed - invalid credentials (401)")
                 session.auth = None
                 return False, None
             else:
-                _LOGGER.debug("Basic auth response: %d", response.status_code)
+                log("Basic auth response: %d", response.status_code)
                 return True, response.text
         except Exception as e:
             _LOGGER.warning("Basic auth verification failed: %s", e)
@@ -197,11 +203,14 @@ class AuthHandler:
         base_url: str,
         username: str | None,
         password: str | None,
+        verbose: bool = False,
     ) -> tuple[bool, str | None]:
         """Handle form-based authentication.
 
         Uses stored form_config to submit login form.
         """
+        log = _LOGGER.info if verbose else _LOGGER.debug
+
         if not username or not password:
             _LOGGER.warning("Form auth configured but no credentials provided")
             return False, None
@@ -231,7 +240,7 @@ class AuthHandler:
             url_encoded = quote(password, safe="@*_+-./")
             encoded_password = base64.b64encode(url_encoded.encode("utf-8")).decode("utf-8")
             password_was_encoded = True
-            _LOGGER.info(
+            log(
                 "Password encoded: URL-escape then base64 (FORM_BASE64 strategy, url_encoded_len=%d)",
                 len(url_encoded),
             )
@@ -245,7 +254,7 @@ class AuthHandler:
 
         # Resolve action URL
         action_url = self._resolve_url(base_url, action)
-        _LOGGER.info(
+        log(
             "Form auth: submitting to %s (strategy=%s, encoded=%s, user_field=%s, pass_field=%s)",
             action_url,
             self.strategy.value,
@@ -265,7 +274,7 @@ class AuthHandler:
 
             # Log cookies and response for debugging
             cookies_after = dict(session.cookies)
-            _LOGGER.info(
+            log(
                 "Form submission: HTTP %d, %d bytes, cookies=%s",
                 response.status_code,
                 len(response.text),
@@ -275,7 +284,7 @@ class AuthHandler:
             # Check form submission response first - some modems (MB7621) return
             # success page directly and don't use cookies. Base URL may always show login.
             form_response_is_login = self._is_login_page(response.text)
-            _LOGGER.info(
+            log(
                 "Form response: is_login_page=%s, size=%d bytes",
                 form_response_is_login,
                 len(response.text),
@@ -283,14 +292,15 @@ class AuthHandler:
 
             if not form_response_is_login:
                 # Form submission returned a non-login page - login succeeded!
-                # Don't check base URL as some modems (MB7621) always show login there
-                _LOGGER.info("Form auth successful - form response is not a login page")
-                return True, response.text
+                # Don't return the form response HTML - it's usually a success page,
+                # not a data page. Let the scraper fetch actual data pages.
+                log("Form auth successful - form response is not a login page")
+                return True, None
 
             # Form submission returned login page - might be error or redirect
             # Try fetching base URL to double-check (works for cookie-based auth)
             data_response = session.get(base_url, headers=headers, timeout=10)
-            _LOGGER.info(
+            log(
                 "Post-login base URL: HTTP %d, %d bytes, is_login=%s",
                 data_response.status_code,
                 len(data_response.text),
@@ -301,7 +311,7 @@ class AuthHandler:
                 if self._is_login_page(data_response.text):
                     _LOGGER.warning("Form auth failed - still on login page after submission")
                     return False, None
-                _LOGGER.info("Form auth successful - base URL has no login form")
+                log("Form auth successful - base URL has no login form")
                 return True, data_response.text
 
             return True, response.text
@@ -332,12 +342,15 @@ class AuthHandler:
         base_url: str,
         username: str | None,
         password: str | None,
+        verbose: bool = False,
     ) -> tuple[bool, str | None]:
         """Handle HNAP/SOAP authentication.
 
         Creates HNAPJsonRequestBuilder and performs challenge-response login.
         The builder is stored for reuse during data fetches.
         """
+        log = _LOGGER.info if verbose else _LOGGER.debug
+
         if not username or not password:
             _LOGGER.warning("HNAP auth configured but no credentials provided")
             return False, None
@@ -352,7 +365,7 @@ class AuthHandler:
             empty_action_value=self.hnap_config.get("empty_action_value", {}),
         )
 
-        _LOGGER.debug(
+        log(
             "HNAP auth: endpoint=%s, namespace=%s",
             self.hnap_config["endpoint"],
             self.hnap_config["namespace"],
@@ -362,7 +375,7 @@ class AuthHandler:
             success, response_text = self._hnap_builder.login(session, base_url, username, password)
 
             if success:
-                _LOGGER.debug("HNAP authentication successful")
+                log("HNAP authentication successful")
                 return True, response_text
             else:
                 _LOGGER.warning("HNAP authentication failed")
@@ -380,6 +393,7 @@ class AuthHandler:
         base_url: str,
         username: str | None,
         password: str | None,
+        verbose: bool = False,
     ) -> tuple[bool, str | None]:
         """Handle URL-based token authentication with session cookie.
 
@@ -387,8 +401,10 @@ class AuthHandler:
         """
         import base64
 
+        log = _LOGGER.info if verbose else _LOGGER.debug
+
         if not username or not password:
-            _LOGGER.debug("No credentials provided for URL token auth, skipping")
+            log("No credentials provided for URL token auth, skipping")
             return True, None
 
         config = self.url_token_config
@@ -400,7 +416,7 @@ class AuthHandler:
 
             # Build login URL with token parameter
             login_url = f"{base_url}{config['login_page']}?{config['login_prefix']}{token}"
-            _LOGGER.debug("URL token auth: Attempting login to %s", base_url)
+            log("URL token auth: Attempting login to %s", base_url)
 
             # Include Authorization header (required by some firmware)
             headers = {"Authorization": f"Basic {token}"}
@@ -414,7 +430,7 @@ class AuthHandler:
 
             # Check if we got data directly in login response
             if config["success_indicator"] in response.text:
-                _LOGGER.info("URL token auth: Got data directly from login")
+                log("URL token auth: Got data directly from login")
                 return True, response.text
 
             # Try to get session token from cookie
@@ -423,14 +439,14 @@ class AuthHandler:
                 _LOGGER.warning("URL token auth: No session cookie received")
                 return True, None  # Return success to allow fallback
 
-            _LOGGER.debug("URL token auth: Got session cookie, fetching data page")
+            log("URL token auth: Got session cookie, fetching data page")
 
             # Fetch data page with session token
             data_url = f"{base_url}{config['data_page']}?{config['token_prefix']}{session_token}"
             data_response = session.get(data_url, headers=headers, timeout=10, verify=False)
 
             if data_response.status_code == 200 and config["success_indicator"] in data_response.text:
-                _LOGGER.info("URL token auth: Authentication successful")
+                log("URL token auth: Authentication successful")
                 return True, data_response.text
 
             _LOGGER.warning(

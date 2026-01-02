@@ -82,8 +82,10 @@ class MotorolaMB7621Parser(ModemParser):
         # Check if we have the connection page with channel data
         # If not (e.g., we got the public info page or login response), fetch MotoConnection.asp
         # MotoConnection.asp has channel data AND system uptime (but NOT software_version)
-        tables_found = soup.find_all("table", class_="moto-table-content")
-        if not tables_found and session and base_url:
+        # NOTE: MotoHome.asp also has moto-table-content tables (system info), so we check
+        # for channel-specific tables (those with Pwr/SNR headers)
+        has_channel_data = self._has_channel_tables(soup)
+        if not has_channel_data and session and base_url:
             _LOGGER.debug("No channel tables found, fetching MotoConnection.asp for channel data")
             try:
                 conn_response = session.get(f"{base_url}/MotoConnection.asp", timeout=10)
@@ -122,6 +124,22 @@ class MotorolaMB7621Parser(ModemParser):
             "upstream": upstream_channels,
             "system_info": system_info,
         }
+
+    def _has_channel_tables(self, soup: BeautifulSoup) -> bool:
+        """Check if the soup contains channel data tables (not just system info tables).
+
+        MotoHome.asp has moto-table-content tables with system info, but no channel data.
+        MotoConnection.asp has moto-table-content tables WITH Pwr/SNR headers for channels.
+        """
+        tables = soup.find_all("table", class_="moto-table-content")
+        for table in tables:
+            headers = [
+                th.text.strip()
+                for th in table.find_all(["th", "td"], class_=["moto-param-header-s", "moto-param-header"])
+            ]
+            if self._is_downstream_table(headers):
+                return True
+        return False
 
     def _is_downstream_table(self, headers: list[str]) -> bool:
         """Check if table headers indicate a downstream channel table."""
@@ -212,7 +230,7 @@ class MotorolaMB7621Parser(ModemParser):
         except Exception as e:
             _LOGGER.error("Error parsing downstream channels: %s", e)
 
-        _LOGGER.info("Parsed %s downstream channels", len(channels))
+        _LOGGER.debug("Parsed %s downstream channels", len(channels))
         return channels
 
     def _parse_upstream(self, soup: BeautifulSoup, system_info: dict) -> list[dict]:
@@ -278,7 +296,7 @@ class MotorolaMB7621Parser(ModemParser):
         except Exception as e:
             _LOGGER.error("Error parsing upstream channels: %s", e)
 
-        _LOGGER.info("Parsed %s upstream channels", len(channels))
+        _LOGGER.debug("Parsed %s upstream channels", len(channels))
         return channels
 
     def _parse_system_info(self, soup: BeautifulSoup) -> dict:

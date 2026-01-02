@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from ..parsers.base_parser import ModemParser
 from .auth.handler import AuthHandler
+from .auth.types import AuthStrategyType
 from .discovery_helpers import (
     DiscoveryCircuitBreaker,
     ParserHeuristics,
@@ -528,6 +529,11 @@ class ModemScraper:
 
         # Use auth handler if we have a stored strategy (v3.12.0+)
         if self._auth_handler and self._auth_strategy:
+            # If strategy is UNKNOWN but parser has hints, use hints instead of logging warning
+            result = self._try_parser_hints_for_unknown_strategy()
+            if result is not None:
+                return result
+
             _LOGGER.debug(
                 "Using auth handler with strategy: %s",
                 self._auth_handler.strategy.value,
@@ -536,10 +542,7 @@ class ModemScraper:
 
             # Transfer HNAP builder to parser for parse() and restart() methods
             if success and self.parser:
-                hnap_builder = self._auth_handler.get_hnap_builder()
-                if hnap_builder:
-                    self.parser._json_builder = hnap_builder  # type: ignore[attr-defined]
-                    _LOGGER.debug("Transferred HNAP builder to parser for authenticated API calls")
+                self._transfer_hnap_builder_to_parser(self._auth_handler)
                 return success, html
 
             # Stored strategy failed - try parser hints fallback
@@ -569,6 +572,34 @@ class ModemScraper:
 
         return self.parser.login(self.session, self.base_url, self.username, self.password)
 
+    def _transfer_hnap_builder_to_parser(self, handler: AuthHandler) -> None:
+        """Transfer HNAP builder from auth handler to parser for authenticated API calls."""
+        hnap_builder = handler.get_hnap_builder()
+        if hnap_builder and self.parser:
+            self.parser._json_builder = hnap_builder  # type: ignore[attr-defined]
+            _LOGGER.debug("Transferred HNAP builder to parser for authenticated API calls")
+
+    def _try_parser_hints_for_unknown_strategy(self) -> tuple[bool, str | None] | None:
+        """Try parser hints when auth strategy is UNKNOWN.
+
+        Returns:
+            tuple[bool, str | None] if hints were found and auth succeeded
+            None if strategy is not UNKNOWN, no hints, or auth failed (caller continues)
+        """
+        if not self._auth_handler or self._auth_handler.strategy != AuthStrategyType.UNKNOWN:
+            return None
+
+        if not self.parser:
+            return None
+
+        _LOGGER.debug("Auth strategy is UNKNOWN, checking for parser hints first")
+        result = self._login_with_parser_hints()
+        if result is not None:
+            return result
+
+        # No hints found - return None to fall through to unknown strategy handling
+        return None
+
     def _login_with_parser_hints(self) -> tuple[bool, str | None] | None:
         """
         Attempt login using parser's auth hints (fallback for old config entries).
@@ -586,8 +617,11 @@ class ModemScraper:
             _LOGGER.debug("Using parser's hnap_hints for HNAP authentication")
             temp_handler = AuthHandler(strategy="hnap_session", hnap_config=hints)
             success, html = temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
-            # Transfer HNAP builder to parser for data fetches
             if success:
+                # Save handler for subsequent polls
+                self._auth_handler = temp_handler
+                _LOGGER.debug("Saved HNAP auth handler for future polls")
+                # Transfer HNAP builder to parser for data fetches
                 hnap_builder = temp_handler.get_hnap_builder()
                 if hnap_builder:
                     self.parser._json_builder = hnap_builder  # type: ignore[attr-defined]
@@ -607,7 +641,11 @@ class ModemScraper:
                 "success_indicator": hints.get("success_indicator", "Downstream"),
             }
             temp_handler = AuthHandler(strategy="url_token_session", url_token_config=url_token_config)
-            return temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
+            success, html = temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
+            if success:
+                self._auth_handler = temp_handler
+                _LOGGER.debug("Saved URL token auth handler for future polls")
+            return success, html
 
         # Check for form hints (MB7621, CGA2121, G54, CM2000)
         if hasattr(self.parser, "auth_form_hints") and self.parser.auth_form_hints:
@@ -627,7 +665,11 @@ class ModemScraper:
             }
 
             temp_handler = AuthHandler(strategy=strategy, form_config=form_config)
-            return temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
+            success, html = temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
+            if success:
+                self._auth_handler = temp_handler
+                _LOGGER.debug("Saved form auth handler (strategy=%s) for future polls", strategy)
+            return success, html
 
         return None  # No hints found
 
@@ -803,12 +845,10 @@ class ModemScraper:
                     response = self.session.get(target_url, timeout=10, auth=auth, verify=self.verify_ssl)
 
                     if response.status_code == 200:
-                        parser_name = parser_class.name if parser_class else "unknown"
-                        _LOGGER.info(
-                            "Successfully connected to %s (HTML: %s bytes, parser: %s)",
+                        _LOGGER.debug(
+                            "Successfully fetched %s (%s bytes)",
                             target_url,
                             len(response.text),
-                            parser_name,
                         )
                         self.last_successful_url = target_url
 
@@ -833,7 +873,7 @@ class ModemScraper:
 
         Note: Excludes fallback parser - only tries real modem parsers.
         """
-        _LOGGER.info("Phase 1: Attempting anonymous probing before authentication")
+        _LOGGER.debug("Phase 1: Attempting anonymous probing before authentication")
 
         for parser_class in self.parsers:
             # Skip fallback parser - it should only be used as last resort
@@ -853,8 +893,8 @@ class ModemScraper:
                     circuit_breaker.record_attempt(parser_class.name)
 
                     if parser_class.can_parse(anon_soup, anon_url, anon_html):
-                        _LOGGER.info(
-                            "✓ Detected modem via anonymous probing: %s (%s)",
+                        _LOGGER.debug(
+                            "Detected modem via anonymous probing: %s (%s)",
                             parser_class.name,
                             parser_class.manufacturer,
                         )
@@ -883,7 +923,7 @@ class ModemScraper:
             circuit_breaker.record_attempt(suggested_parser.name)
             _LOGGER.debug("Testing suggested parser: %s", suggested_parser.name)
             if suggested_parser.can_parse(soup, url, html):
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Detected modem using suggested parser: %s (%s)",
                     suggested_parser.name,
                     suggested_parser.manufacturer,
@@ -905,7 +945,7 @@ class ModemScraper:
 
         Note: Excludes fallback parser - only tries real modem parsers.
         """
-        _LOGGER.info("Phase 3: Using parser heuristics to prioritize likely parsers")
+        _LOGGER.debug("Phase 3: Using parser heuristics to prioritize likely parsers")
         prioritized_parsers = ParserHeuristics.get_likely_parsers(
             self.base_url, self.parsers, self.session, self.verify_ssl
         )
@@ -928,7 +968,7 @@ class ModemScraper:
                 circuit_breaker.record_attempt(parser_class.name)
                 _LOGGER.debug("Testing parser: %s", parser_class.name)
                 if parser_class.can_parse(soup, url, html):
-                    _LOGGER.info("✓ Detected modem: %s (%s)", parser_class.name, parser_class.manufacturer)
+                    _LOGGER.debug("Detected modem: %s (%s)", parser_class.name, parser_class.manufacturer)
                     return parser_class()
                 else:
                     attempted_parsers.append(parser_class.name)
@@ -1044,7 +1084,7 @@ class ModemScraper:
             # Login and get authenticated HTML
             html_or_none = self._handle_login_result(html)
             if html_or_none is None:
-                return self._create_error_response("unreachable")
+                return self._create_error_response("auth_failed")
             html = html_or_none
 
             # Parse data and build response

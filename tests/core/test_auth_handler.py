@@ -185,8 +185,8 @@ class TestAuthHandlerFormAuth:
         )
 
         assert success is True
-        # Form response is returned directly since it's not a login page
-        assert html == "<html>Success Page</html>"
+        # Form response is NOT returned - let scraper fetch data pages
+        assert html is None
 
         # Verify form was submitted correctly
         session.post.assert_called_once()
