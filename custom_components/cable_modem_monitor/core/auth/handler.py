@@ -219,11 +219,13 @@ class AuthHandler:
 
         # Encode password if using FORM_BASE64 strategy
         encoded_password = password
+        password_was_encoded = False
         if self.strategy == AuthStrategyType.FORM_BASE64 and password:
             import base64
 
             encoded_password = base64.b64encode(password.encode("utf-8")).decode("utf-8")
-            _LOGGER.debug("Password encoded with base64 for FORM_BASE64 strategy")
+            password_was_encoded = True
+            _LOGGER.info("Password encoded with base64 for FORM_BASE64 strategy")
 
         # Build form data
         form_data = {
@@ -235,12 +237,12 @@ class AuthHandler:
         # Resolve action URL
         action_url = self._resolve_url(base_url, action)
         _LOGGER.info(
-            "Form auth: submitting to %s (method=%s, user_field=%s, pass_field=%s, hidden=%s)",
+            "Form auth: submitting to %s (strategy=%s, encoded=%s, user_field=%s, pass_field=%s)",
             action_url,
-            method,
+            self.strategy.value,
+            password_was_encoded,
             username_field,
             password_field,
-            list(hidden_fields.keys()) if hidden_fields else [],
         )
 
         try:
