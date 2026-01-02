@@ -234,11 +234,13 @@ class AuthHandler:
 
         # Resolve action URL
         action_url = self._resolve_url(base_url, action)
-        _LOGGER.debug(
-            "Submitting form to %s (method=%s, user_field=%s)",
+        _LOGGER.info(
+            "Form auth: submitting to %s (method=%s, user_field=%s, pass_field=%s, hidden=%s)",
             action_url,
             method,
             username_field,
+            password_field,
+            list(hidden_fields.keys()) if hidden_fields else [],
         )
 
         try:
@@ -247,17 +249,29 @@ class AuthHandler:
             else:
                 response = session.get(action_url, params=form_data, timeout=10)
 
-            _LOGGER.debug("Form submission response: %d", response.status_code)
+            _LOGGER.info(
+                "Form submission response: HTTP %d, %d bytes",
+                response.status_code,
+                len(response.text),
+            )
 
-            # Check if we got redirected back to login (auth failed)
-            if self._is_login_page(response.text):
-                _LOGGER.warning("Form auth failed - still on login page")
-                return False, None
-
-            # Fetch base URL to get authenticated HTML
+            # Fetch base URL to check if we're authenticated
+            # The form action response (/goform/login) is often a status page, not the data page
+            # We need to check the actual data page to see if login succeeded
             data_response = session.get(base_url, timeout=10)
+            _LOGGER.info(
+                "Post-login base URL response: HTTP %d, %d bytes, has_password_field=%s",
+                data_response.status_code,
+                len(data_response.text),
+                self._is_login_page(data_response.text),
+            )
+
             if data_response.status_code == 200:
-                _LOGGER.debug("Form auth successful")
+                # Check if we're still on a login page (auth failed)
+                if self._is_login_page(data_response.text):
+                    _LOGGER.warning("Form auth failed - base URL still shows login page")
+                    return False, None
+                _LOGGER.info("Form auth successful - base URL has no login form")
                 return True, data_response.text
 
             return True, response.text

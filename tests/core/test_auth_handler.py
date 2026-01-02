@@ -231,7 +231,7 @@ class TestAuthHandlerFormAuth:
         assert html is None
 
     def test_form_auth_detects_login_page_failure(self):
-        """Test form auth detects when still on login page."""
+        """Test form auth detects when base URL still shows login page after form submission."""
         form_config = {
             "action": "/login",
             "method": "POST",
@@ -241,11 +241,17 @@ class TestAuthHandlerFormAuth:
         handler = AuthHandler(strategy=AuthStrategyType.FORM_PLAIN, form_config=form_config)
         session = MagicMock()
 
-        # Post returns login page again (wrong credentials)
+        # Post returns status page (form action handler)
         post_response = MagicMock()
         post_response.status_code = 200
-        post_response.text = '<html><form><input type="password" name="pass"></form></html>'
+        post_response.text = "<html>Login status</html>"
         session.post.return_value = post_response
+
+        # Base URL still shows login page (wrong credentials)
+        get_response = MagicMock()
+        get_response.status_code = 200
+        get_response.text = '<html><form><input type="password" name="pass"></form></html>'
+        session.get.return_value = get_response
 
         success, html = handler.authenticate(
             session=session,
@@ -256,6 +262,44 @@ class TestAuthHandlerFormAuth:
 
         assert success is False
         assert html is None
+
+    def test_form_auth_succeeds_when_form_action_has_password_but_base_url_does_not(self):
+        """Test form auth succeeds when form action response has password field but base URL doesn't.
+
+        This is the MB7621 scenario: /goform/login returns a page with a password field,
+        but after successful login, the base URL (MotoSwInfo.asp) shows data without login form.
+        """
+        form_config = {
+            "action": "/goform/login",
+            "method": "POST",
+            "username_field": "loginUsername",
+            "password_field": "loginPassword",
+        }
+        handler = AuthHandler(strategy=AuthStrategyType.FORM_PLAIN, form_config=form_config)
+        session = MagicMock()
+
+        # Form action response has a password field (status page with form)
+        post_response = MagicMock()
+        post_response.status_code = 200
+        post_response.text = '<html><form><input type="password" name="pwd"></form>Status</html>'
+        session.post.return_value = post_response
+
+        # But base URL shows data page (no login form) - this is the real success indicator
+        get_response = MagicMock()
+        get_response.status_code = 200
+        get_response.text = "<html><h1>Modem Status</h1><table>Channel data...</table></html>"
+        session.get.return_value = get_response
+
+        success, html = handler.authenticate(
+            session=session,
+            base_url="http://192.168.100.1/MotoSwInfo.asp",
+            username="admin",
+            password="password",
+        )
+
+        assert success is True
+        assert html is not None
+        assert "Modem Status" in html
 
     def test_form_auth_uses_get_method(self):
         """Test form auth uses GET when method is GET."""
