@@ -370,22 +370,151 @@ def _detect_legacy_ssl_sync(host: str) -> bool:
         return False
 
 
+def _try_auth_with_parser_hints(
+    session: Any,
+    base_url: str,
+    username: str,
+    password: str,
+    parser_auth_hints: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Try authenticating using parser-provided auth hints.
+
+    Args:
+        session: requests.Session to use
+        base_url: Modem base URL
+        username: Username for authentication
+        password: Password for authentication
+        parser_auth_hints: Auth hints from selected parser
+
+    Returns:
+        Result dict if successful, None if auth failed (caller should fall back)
+    """
+    from .core.auth.handler import AuthHandler
+
+    password_encoding = parser_auth_hints.get("password_encoding", "plain")
+    strategy = "form_base64" if password_encoding == "base64" else "form_plain"
+
+    form_config = {
+        "action": parser_auth_hints.get("login_url", ""),
+        "method": "POST",
+        "username_field": parser_auth_hints.get("username_field", "username"),
+        "password_field": parser_auth_hints.get("password_field", "password"),
+        "hidden_fields": {},
+    }
+
+    _LOGGER.info(
+        "Using parser auth hints: strategy=%s, action=%s",
+        strategy,
+        form_config["action"],
+    )
+
+    handler = AuthHandler(strategy=strategy, form_config=form_config)
+    success, html = handler.authenticate(session, base_url, username, password)
+
+    if success:
+        _LOGGER.info("Parser hints auth successful: strategy=%s", strategy)
+        return {
+            "auth_strategy": strategy,
+            "auth_form_config": form_config,
+            "auth_discovery_status": "success",
+            "auth_discovery_error": None,
+            "authenticated_session": session,
+            "authenticated_html": html,
+        }
+
+    _LOGGER.warning("Parser hints auth failed, falling back to generic discovery")
+    return None
+
+
+def _create_auth_session(base_url: str, legacy_ssl: bool) -> Any:
+    """Create a requests.Session configured for auth discovery.
+
+    Args:
+        base_url: Base URL (used to check if HTTPS)
+        legacy_ssl: Whether to use legacy SSL ciphers
+
+    Returns:
+        Configured requests.Session
+    """
+    import requests
+    import urllib3
+
+    session = requests.Session()
+    if legacy_ssl and base_url.startswith("https://"):
+        from .core.ssl_adapter import LegacySSLAdapter
+
+        session.mount("https://", LegacySSLAdapter())
+        _LOGGER.debug("Auth discovery using legacy SSL ciphers")
+
+    session.verify = VERIFY_SSL
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    return session
+
+
+def _process_discovery_result(discovery_result: DiscoveryResult, session: Any) -> dict[str, Any]:
+    """Process auth discovery result into result dict.
+
+    Args:
+        discovery_result: Result from AuthDiscovery.discover()
+        session: The session used for discovery
+
+    Returns:
+        Result dictionary for config flow
+    """
+    result: dict[str, Any] = {
+        "auth_strategy": AuthStrategyType.UNKNOWN.value,
+        "auth_form_config": None,
+        "auth_discovery_status": "unknown",
+        "auth_discovery_error": None,
+        "authenticated_session": session,
+        "authenticated_html": discovery_result.response_html,
+    }
+
+    if discovery_result.strategy:
+        result["auth_strategy"] = discovery_result.strategy.value
+
+    if discovery_result.form_config:
+        result["auth_form_config"] = {
+            "action": discovery_result.form_config.action,
+            "method": discovery_result.form_config.method,
+            "username_field": discovery_result.form_config.username_field,
+            "password_field": discovery_result.form_config.password_field,
+            "hidden_fields": discovery_result.form_config.hidden_fields,
+        }
+
+    if discovery_result.error_message:
+        result["auth_discovery_status"] = "error"
+        result["auth_discovery_error"] = discovery_result.error_message
+        _LOGGER.warning("Auth discovery error: %s", discovery_result.error_message)
+    elif discovery_result.strategy is None:
+        result["auth_discovery_status"] = "unknown"
+        _LOGGER.warning("Auth discovery returned no strategy - will fall back to parser.login()")
+    else:
+        result["auth_discovery_status"] = "success"
+        _LOGGER.info("Auth discovery successful: strategy=%s", discovery_result.strategy.value)
+
+    return result
+
+
 def _run_auth_discovery_sync(
     host: str,
     username: str | None,
     password: str | None,
     legacy_ssl: bool,
+    parser_auth_hints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run auth discovery synchronously (for executor).
 
-    Discovers the authentication strategy for a modem before parser detection.
-    This runs BEFORE parser selection so we don't have a parser yet.
+    Discovers the authentication strategy for a modem. When parser_auth_hints
+    are provided (user selected a specific parser), uses those hints for
+    accurate strategy detection including password encoding requirements.
 
     Args:
         host: Modem IP address or hostname
         username: Optional username for authentication
         password: Optional password for authentication
         legacy_ssl: Whether to use legacy SSL ciphers
+        parser_auth_hints: Optional auth hints from selected parser
 
     Returns:
         Dictionary with auth discovery results:
@@ -396,49 +525,34 @@ def _run_auth_discovery_sync(
         - authenticated_session: requests.Session with auth applied (or None)
         - authenticated_html: HTML from authenticated response (or None)
     """
-    import requests
-
     # Build base URL - try HTTPS first like main scraper
-    if host.startswith(("http://", "https://")):
-        base_url = host.rstrip("/")
-    else:
-        base_url = f"https://{host}"
+    base_url = host.rstrip("/") if host.startswith(("http://", "https://")) else f"https://{host}"
 
     # Create session with SSL settings
-    session = requests.Session()
-    if legacy_ssl and base_url.startswith("https://"):
-        from .core.ssl_adapter import LegacySSLAdapter
-
-        session.mount("https://", LegacySSLAdapter())
-        _LOGGER.debug("Auth discovery using legacy SSL ciphers")
-
-    # Disable SSL verification for self-signed modem certs
-    session.verify = VERIFY_SSL
-
-    # Suppress SSL warnings for the session
-    import urllib3
-
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    result: dict[str, Any] = {
-        "auth_strategy": AuthStrategyType.UNKNOWN.value,
-        "auth_form_config": None,
-        "auth_discovery_status": "unknown",
-        "auth_discovery_error": None,
-        "authenticated_session": None,
-        "authenticated_html": None,
-    }
+    session = _create_auth_session(base_url, legacy_ssl)
 
     # If no credentials provided, assume no auth needed
     if not username and not password:
         _LOGGER.info("No credentials provided, assuming NO_AUTH strategy")
-        result["auth_strategy"] = AuthStrategyType.NO_AUTH.value
-        result["auth_discovery_status"] = "success"
-        result["authenticated_session"] = session
-        return result
+        return {
+            "auth_strategy": AuthStrategyType.NO_AUTH.value,
+            "auth_form_config": None,
+            "auth_discovery_status": "success",
+            "auth_discovery_error": None,
+            "authenticated_session": session,
+            "authenticated_html": None,
+        }
+
+    # If parser hints are available, use them directly for accurate auth
+    # This handles cases like MB7621 which needs base64-encoded passwords
+    if parser_auth_hints and username and password:
+        hints_result = _try_auth_with_parser_hints(session, base_url, username, password, parser_auth_hints)
+        if hints_result:
+            return hints_result
+        # Fall through to generic discovery if hints auth failed
 
     try:
-        # Run auth discovery without a parser (parser detection happens later)
+        # Run generic auth discovery
         discovery = AuthDiscovery()
         discovery_result: DiscoveryResult = discovery.discover(
             session=session,
@@ -448,47 +562,18 @@ def _run_auth_discovery_sync(
             password=password or "",
             parser=None,  # No parser yet - just discovering auth strategy
         )
-
-        # Store strategy (may be None if discovery failed)
-        if discovery_result.strategy:
-            result["auth_strategy"] = discovery_result.strategy.value
-        result["authenticated_html"] = discovery_result.response_html
-
-        if discovery_result.form_config:
-            # Serialize form config for storage
-            result["auth_form_config"] = {
-                "action": discovery_result.form_config.action,
-                "method": discovery_result.form_config.method,
-                "username_field": discovery_result.form_config.username_field,
-                "password_field": discovery_result.form_config.password_field,
-                "hidden_fields": discovery_result.form_config.hidden_fields,
-            }
-
-        # Session is modified in place by auth discovery
-        result["authenticated_session"] = session
-
-        if discovery_result.error_message:
-            result["auth_discovery_status"] = "error"
-            result["auth_discovery_error"] = discovery_result.error_message
-            _LOGGER.warning("Auth discovery error: %s", discovery_result.error_message)
-        elif discovery_result.strategy is None:
-            result["auth_discovery_status"] = "unknown"
-            _LOGGER.warning("Auth discovery returned no strategy - will fall back to parser.login()")
-        else:
-            result["auth_discovery_status"] = "success"
-            _LOGGER.info(
-                "Auth discovery successful: strategy=%s",
-                discovery_result.strategy.value,
-            )
+        return _process_discovery_result(discovery_result, session)
 
     except Exception as e:
         _LOGGER.error("Auth discovery failed with exception: %s", e)
-        result["auth_discovery_status"] = "error"
-        result["auth_discovery_error"] = str(e)
-        # Return session anyway so scraper can fall back to parser.login()
-        result["authenticated_session"] = session
-
-    return result
+        return {
+            "auth_strategy": AuthStrategyType.UNKNOWN.value,
+            "auth_form_config": None,
+            "auth_discovery_status": "error",
+            "auth_discovery_error": str(e),
+            "authenticated_session": session,
+            "authenticated_html": None,
+        }
 
 
 async def _test_icmp_ping(host: str) -> bool:
@@ -539,26 +624,38 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         _LOGGER.error("Connectivity check failed for %s: %s", host, error_msg)
         raise CannotConnectError(error_msg)
 
-    # Step 2 (v3.12.0+): Run auth discovery BEFORE parser detection
-    # This discovers the authentication strategy based on HTTP response analysis
-    # Use the working URL from connectivity check (not just host) to avoid re-guessing HTTP/HTTPS
+    # Get parsers and check if user selected a specific one
+    # We need this BEFORE auth discovery so we can use parser hints
+    all_parsers = await hass.async_add_executor_job(get_parsers)
+    selected_parser, parser_name_hint = _select_parser_for_validation(
+        all_parsers, data.get(CONF_MODEM_CHOICE), data.get(CONF_PARSER_NAME)
+    )
+
+    # Step 2 (v3.12.0+): Run auth discovery with parser hints if available
+    # When user selects a specific parser, use its auth hints for better accuracy
     username = data.get(CONF_USERNAME)
     password = data.get(CONF_PASSWORD)
     discovery_url = working_url or host
+
+    # Extract parser hints if user selected a specific parser
+    parser_auth_hints = None
+    if selected_parser:
+        parser_auth_hints = getattr(selected_parser, "auth_form_hints", None)
+        if parser_auth_hints:
+            _LOGGER.info(
+                "Using parser %s auth hints for discovery (encoding=%s)",
+                selected_parser.name,
+                parser_auth_hints.get("password_encoding", "plain"),
+            )
+
     _LOGGER.info("Running auth discovery for %s...", discovery_url)
     auth_result = await hass.async_add_executor_job(
-        _run_auth_discovery_sync, discovery_url, username, password, legacy_ssl
+        _run_auth_discovery_sync, discovery_url, username, password, legacy_ssl, parser_auth_hints
     )
     _LOGGER.info(
         "Auth discovery result: strategy=%s, status=%s",
         auth_result.get("auth_strategy"),
         auth_result.get("auth_discovery_status"),
-    )
-
-    # Get parsers and select appropriate one(s)
-    all_parsers = await hass.async_add_executor_job(get_parsers)
-    selected_parser, parser_name_hint = _select_parser_for_validation(
-        all_parsers, data.get(CONF_MODEM_CHOICE), data.get(CONF_PARSER_NAME)
     )
 
     # Create scraper
