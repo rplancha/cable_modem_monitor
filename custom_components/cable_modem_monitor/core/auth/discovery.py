@@ -354,6 +354,13 @@ class AuthDiscovery:
         # Check for success - fetch data page
         try:
             data_response = session.get(data_url, timeout=10)
+
+            # First check if we're still on login page (credentials rejected)
+            # This is important when parser=None (discovery-only mode)
+            if self._is_login_form(data_response.text):
+                _LOGGER.debug("Data page still shows login form - credentials rejected")
+                return self._error_result("Invalid credentials. Still on login page after form submission.")
+
             if self._can_parse_data(data_response.text, parser):
                 _LOGGER.debug("Form auth succeeded")
                 return DiscoveryResult(

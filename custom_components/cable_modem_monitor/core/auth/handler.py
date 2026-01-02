@@ -249,10 +249,13 @@ class AuthHandler:
             else:
                 response = session.get(action_url, params=form_data, timeout=10)
 
+            # Log snippet of form submission response to help debug auth failures
+            form_snippet = response.text[:300].replace("\n", " ").replace("\r", "")
             _LOGGER.info(
-                "Form submission response: HTTP %d, %d bytes",
+                "Form submission response: HTTP %d, %d bytes. Snippet: %s...",
                 response.status_code,
                 len(response.text),
+                form_snippet,
             )
 
             # Fetch base URL to check if we're authenticated
@@ -269,7 +272,12 @@ class AuthHandler:
             if data_response.status_code == 200:
                 # Check if we're still on a login page (auth failed)
                 if self._is_login_page(data_response.text):
-                    _LOGGER.warning("Form auth failed - base URL still shows login page")
+                    # Log snippet of response to help debug
+                    snippet = data_response.text[:500].replace("\n", " ").replace("\r", "")
+                    _LOGGER.warning(
+                        "Form auth failed - base URL still shows login page. Response snippet: %s...",
+                        snippet,
+                    )
                     return False, None
                 _LOGGER.info("Form auth successful - base URL has no login form")
                 return True, data_response.text

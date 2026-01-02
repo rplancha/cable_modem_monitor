@@ -134,13 +134,12 @@ class TestSetupDiscoveryFormAuth:
         assert "csrf_token" in hidden_fields
 
     def test_form_auth_wrong_credentials(self, form_auth_server):
-        """Wrong credentials for form auth - strategy detected but auth incomplete.
+        """Wrong credentials for form auth - discovery detects and reports error.
 
         Form auth discovery identifies the form and submits credentials.
         With wrong credentials, the mock server re-displays the login form.
-        Discovery still "succeeds" at strategy detection, but the session
-        won't have authentication cookies. Actual auth validation happens
-        at scraper runtime.
+        Discovery detects we're still on login page and returns an error,
+        allowing the user to correct credentials before setup completes.
         """
         host = form_auth_server.url
 
@@ -151,12 +150,11 @@ class TestSetupDiscoveryFormAuth:
             legacy_ssl=False,
         )
 
-        # Strategy detection still succeeds - we found and submitted a form
-        # The session just won't have valid cookies for authenticated access
-        assert result["auth_strategy"] == AuthStrategyType.FORM_PLAIN.value
-        assert result["auth_discovery_status"] == "success"
-        # Session exists but authentication state is incomplete
-        assert result["authenticated_session"] is not None
+        # Auth discovery should detect invalid credentials
+        assert result["auth_discovery_status"] == "error"
+        assert "Invalid credentials" in (result.get("auth_discovery_error") or "")
+        # Strategy remains unknown since auth failed
+        assert result["auth_strategy"] == AuthStrategyType.UNKNOWN.value
 
 
 class TestSetupDiscoveryRedirect:
