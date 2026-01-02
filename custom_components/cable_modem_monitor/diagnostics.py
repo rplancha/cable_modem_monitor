@@ -12,7 +12,16 @@ from typing import Any, cast
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, VERSION
+from .const import (
+    CONF_AUTH_CAPTURED_RESPONSE,
+    CONF_AUTH_DISCOVERY_ERROR,
+    CONF_AUTH_DISCOVERY_FAILED,
+    CONF_AUTH_DISCOVERY_STATUS,
+    CONF_AUTH_FORM_CONFIG,
+    CONF_AUTH_STRATEGY,
+    DOMAIN,
+    VERSION,
+)
 from .utils.html_helper import sanitize_html
 
 _LOGGER = logging.getLogger(__name__)
@@ -337,6 +346,78 @@ def _get_detection_method(entry: ConfigEntry) -> str:
         return "user_selected"
 
 
+def _get_auth_discovery_info(entry: ConfigEntry) -> dict[str, Any]:
+    """Get authentication discovery information from config entry.
+
+    This provides comprehensive auth debugging info from v3.12.0+ response-driven
+    auth discovery. For modems with unknown auth patterns, captured_response
+    contains the login page HTML and headers for debugging.
+
+    Args:
+        entry: Config entry containing auth discovery data
+
+    Returns:
+        Dict with auth discovery status, strategy, and debug info
+    """
+    # Get strategy info
+    strategy = entry.data.get(CONF_AUTH_STRATEGY)
+    form_config = entry.data.get(CONF_AUTH_FORM_CONFIG)
+    status = entry.data.get(CONF_AUTH_DISCOVERY_STATUS, "not_run")
+    failed = entry.data.get(CONF_AUTH_DISCOVERY_FAILED, False)
+    error = entry.data.get(CONF_AUTH_DISCOVERY_ERROR)
+    captured_response = entry.data.get(CONF_AUTH_CAPTURED_RESPONSE)
+
+    info: dict[str, Any] = {
+        "status": status,
+        "strategy": strategy or "not_set",
+    }
+
+    # Include form config if present (for form-based auth debugging)
+    if form_config:
+        # Sanitize form config - it shouldn't contain sensitive data but be safe
+        safe_form_config = {k: v for k, v in form_config.items() if k not in ("password", "secret")}
+        info["form_config"] = safe_form_config
+
+    # Include failure info if discovery failed
+    if failed:
+        info["discovery_failed"] = True
+        info["note"] = (
+            "Auth discovery failed but modem may still work. " "Please share diagnostics to help improve detection."
+        )
+
+    if error:
+        info["error"] = _sanitize_log_message(error)
+
+    # Include captured response for unknown patterns (very helpful for debugging)
+    if captured_response:
+        info["captured_response"] = {
+            "status_code": captured_response.get("status_code"),
+            "url": captured_response.get("url"),
+            "headers": {k: _sanitize_log_message(str(v)) for k, v in captured_response.get("headers", {}).items()},
+            # Truncate and sanitize HTML sample
+            "html_sample": sanitize_html((captured_response.get("html_sample") or "")[:3000]),
+            "note": (
+                "Captured response from unknown auth pattern. "
+                "This helps developers add support for your modem's auth method."
+            ),
+        }
+
+    # Add explanation based on strategy
+    strategy_notes = {
+        "no_auth": "Modem allows anonymous access - no login required",
+        "basic_http": "HTTP Basic Auth (401 challenge-response)",
+        "form_plain": "HTML form login with plain-text credentials",
+        "form_base64": "HTML form login with base64-encoded credentials",
+        "hnap_session": "HNAP/SOAP protocol (Arris S33, Motorola MB8611)",
+        "url_token_session": "URL-based token auth (SB8200 HTTPS)",
+        "unknown": "Unknown auth pattern - captured for debugging",
+    }
+    if strategy and strategy in strategy_notes:
+        info["strategy_description"] = strategy_notes[strategy]
+
+    return info
+
+
 def _get_hnap_auth_attempt(coordinator) -> dict[str, Any]:
     """Get HNAP authentication attempt details from the parser if available.
 
@@ -444,6 +525,8 @@ def _build_diagnostics_dict(hass: HomeAssistant, coordinator, entry: ConfigEntry
             "legacy_ssl": entry.data.get("legacy_ssl", False),
             "last_detection": entry.data.get("last_detection", "Never"),
         },
+        # Auth discovery info (v3.12.0+) - shows how authentication was detected
+        "auth_discovery": _get_auth_discovery_info(entry),
         "coordinator": {
             "last_update_success": coordinator.last_update_success,
             "update_interval": str(coordinator.update_interval),

@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.cable_modem_monitor.const import DOMAIN
 from custom_components.cable_modem_monitor.diagnostics import (
+    _get_auth_discovery_info,
     _get_hnap_auth_attempt,
     _sanitize_log_message,
     async_get_config_entry_diagnostics,
@@ -884,3 +885,169 @@ class TestGetHnapAuthAttempt:
 
         assert "Error retrieving auth data" in result["note"]
         assert "Exception" in result["note"]
+
+
+class TestGetAuthDiscoveryInfo:
+    """Test _get_auth_discovery_info helper function (v3.12.0+)."""
+
+    def test_returns_minimal_info_when_no_strategy(self):
+        """Test returns minimal info when no auth strategy configured."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {}
+
+        result = _get_auth_discovery_info(entry)
+
+        assert result["status"] == "not_run"
+        assert result["strategy"] == "not_set"
+        assert "form_config" not in result
+        assert "captured_response" not in result
+
+    def test_returns_strategy_with_description(self):
+        """Test returns strategy with description for known strategies."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {
+            "auth_strategy": "basic_http",
+            "auth_discovery_status": "success",
+        }
+
+        result = _get_auth_discovery_info(entry)
+
+        assert result["status"] == "success"
+        assert result["strategy"] == "basic_http"
+        assert result["strategy_description"] == "HTTP Basic Auth (401 challenge-response)"
+
+    def test_returns_form_config_for_form_auth(self):
+        """Test returns form config for form-based auth."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {
+            "auth_strategy": "form_plain",
+            "auth_discovery_status": "success",
+            "auth_form_config": {
+                "action": "/login",
+                "method": "POST",
+                "username_field": "user",
+                "password_field": "pass",
+                "hidden_fields": {"csrf": "token123"},
+            },
+        }
+
+        result = _get_auth_discovery_info(entry)
+
+        assert result["strategy"] == "form_plain"
+        assert "form_config" in result
+        assert result["form_config"]["action"] == "/login"
+        assert result["form_config"]["username_field"] == "user"
+
+    def test_includes_failure_info_when_discovery_failed(self):
+        """Test includes failure info when discovery failed but modem works."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {
+            "auth_strategy": "unknown",
+            "auth_discovery_status": "unknown_pattern",
+            "auth_discovery_failed": True,
+            "auth_discovery_error": "Unknown authentication protocol detected",
+        }
+
+        result = _get_auth_discovery_info(entry)
+
+        assert result["discovery_failed"] is True
+        assert "note" in result
+        assert "help improve" in result["note"]
+        assert "Unknown authentication" in result["error"]
+
+    def test_includes_captured_response_for_unknown_pattern(self):
+        """Test includes captured response for unknown auth patterns."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {
+            "auth_strategy": "unknown",
+            "auth_discovery_status": "unknown_pattern",
+            "auth_captured_response": {
+                "status_code": 200,
+                "url": "http://192.168.100.1/login.asp",
+                "headers": {"Content-Type": "text/html"},
+                "html_sample": "<html><form><input type='password'></form></html>",
+            },
+        }
+
+        result = _get_auth_discovery_info(entry)
+
+        assert "captured_response" in result
+        assert result["captured_response"]["status_code"] == 200
+        assert "login.asp" in result["captured_response"]["url"]
+        assert "developers add support" in result["captured_response"]["note"]
+
+    def test_sanitizes_captured_response_html(self):
+        """Test that captured response HTML is sanitized."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {
+            "auth_strategy": "unknown",
+            "auth_captured_response": {
+                "status_code": 200,
+                "url": "http://192.168.100.1/login.asp",
+                "headers": {"Content-Type": "text/html"},
+                # HTML with MAC address that should be sanitized
+                "html_sample": "<html>MAC: AA:BB:CC:DD:EE:FF</html>",
+            },
+        }
+
+        result = _get_auth_discovery_info(entry)
+
+        # MAC should be sanitized in html_sample
+        assert "AA:BB:CC:DD:EE:FF" not in result["captured_response"]["html_sample"]
+        assert "XX:XX:XX:XX:XX:XX" in result["captured_response"]["html_sample"]
+
+    def test_hnap_session_strategy_description(self):
+        """Test HNAP strategy has correct description."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {
+            "auth_strategy": "hnap_session",
+            "auth_discovery_status": "success",
+        }
+
+        result = _get_auth_discovery_info(entry)
+
+        assert result["strategy"] == "hnap_session"
+        assert "HNAP/SOAP" in result["strategy_description"]
+        assert "S33" in result["strategy_description"]
+
+    def test_no_auth_strategy_description(self):
+        """Test NO_AUTH strategy has correct description."""
+        entry = Mock(spec=ConfigEntry)
+        entry.data = {
+            "auth_strategy": "no_auth",
+            "auth_discovery_status": "success",
+        }
+
+        result = _get_auth_discovery_info(entry)
+
+        assert result["strategy"] == "no_auth"
+        assert "anonymous access" in result["strategy_description"]
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_includes_auth_discovery(mock_config_entry, mock_coordinator):
+    """Test that diagnostics includes auth_discovery section."""
+    hass = _create_mock_hass({DOMAIN: {mock_config_entry.entry_id: mock_coordinator}})
+
+    # Update config entry with auth discovery data
+    mock_config_entry.data = {
+        **mock_config_entry.data,
+        "auth_strategy": "form_plain",
+        "auth_discovery_status": "success",
+        "auth_form_config": {
+            "action": "/login",
+            "method": "POST",
+            "username_field": "username",
+            "password_field": "password",
+        },
+    }
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, mock_config_entry)
+
+    # Verify auth_discovery section exists
+    assert "auth_discovery" in diagnostics
+    auth = diagnostics["auth_discovery"]
+    assert auth["status"] == "success"
+    assert auth["strategy"] == "form_plain"
+    assert "form_config" in auth
+    assert auth["form_config"]["action"] == "/login"

@@ -99,22 +99,37 @@ url_patterns = [
 ]
 ```
 
-### 5. Pluggable Authentication Strategies
+### 5. Response-Driven Authentication Discovery (v3.12+)
 
-**Decision:** Authentication logic is encapsulated in strategy classes, separate from parsers.
+**Decision:** Authentication is auto-discovered by inspecting modem responses, not declared by parsers.
 
 **Rationale:**
-- Parsers declare *what* auth they need, not *how* to implement it
-- Common auth patterns (form POST, HTTP basic, HNAP) are reusable
-- New auth methods can be added without modifying existing parsers
+- Parsers focus on parsing only - no auth logic needed
+- Auth is discovered once during setup, stored in config entry
+- Same modem model at different ISPs may have different auth requirements
+- Unknown auth patterns are captured for debugging
 
-**How it works:**
-1. Parser declares `auth_config` (e.g., `FormAuthConfig` with login path and field names)
-2. Parser's `login()` method calls `AuthFactory.get_strategy()` to get the right strategy
-3. Strategy handles protocol details (encoding, headers, session cookies)
-4. Parser receives success/failure result
+**How it works (Setup Flow):**
+1. `AuthDiscovery.discover()` fetches modem page anonymously
+2. Response is inspected: 200+data → NO_AUTH, 401 → BASIC_HTTP, form → FORM_PLAIN, etc.
+3. Strategy and form config (if applicable) stored in config entry
+4. Parser detection runs on authenticated HTML
 
-**Available strategies:** `NO_AUTH`, `BASIC_HTTP`, `FORM_PLAIN`, `FORM_BASE64`, `HNAP_SESSION`, and others.
+**How it works (Polling Flow):**
+1. `AuthHandler` reads stored strategy from config entry
+2. Executes strategy to authenticate session
+3. Scraper fetches data with authenticated session
+4. Parser parses the data (no auth involvement)
+
+**Available strategies:** `NO_AUTH`, `BASIC_HTTP`, `FORM_PLAIN`, `FORM_BASE64`, `HNAP_SESSION`, `URL_TOKEN_SESSION`.
+
+**Parser Auth Hints (Optional):**
+For non-standard forms, parsers can provide optional hints:
+```python
+class MyParser(ModemParser):
+    auth_form_hints = {"username_field": "webUserName"}  # Non-standard field names
+    js_auth_hints = {"pattern": "url_token_session"}     # JS-based auth (SB8200)
+```
 
 → **For implementation details, see [`core/auth/README.md`](../../custom_components/cable_modem_monitor/core/auth/README.md)**
 
