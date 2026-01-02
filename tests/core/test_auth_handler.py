@@ -164,11 +164,12 @@ class TestAuthHandlerFormAuth:
         session = MagicMock()
 
         # Mock post response (after form submission)
+        # This response doesn't have a password field, so it's considered success
         post_response = MagicMock()
         post_response.status_code = 302
-        post_response.text = "<html>Redirecting...</html>"
+        post_response.text = "<html>Success Page</html>"
 
-        # Mock get response (fetching data page)
+        # Mock get response (not used since form response is already successful)
         get_response = MagicMock()
         get_response.status_code = 200
         get_response.text = "<html>Status Page</html>"
@@ -184,7 +185,8 @@ class TestAuthHandlerFormAuth:
         )
 
         assert success is True
-        assert html == "<html>Status Page</html>"
+        # Form response is returned directly since it's not a login page
+        assert html == "<html>Success Page</html>"
 
         # Verify form was submitted correctly
         session.post.assert_called_once()
@@ -241,13 +243,13 @@ class TestAuthHandlerFormAuth:
         handler = AuthHandler(strategy=AuthStrategyType.FORM_PLAIN, form_config=form_config)
         session = MagicMock()
 
-        # Post returns status page (form action handler)
+        # Post returns login page again (wrong credentials - modem re-shows login form)
         post_response = MagicMock()
         post_response.status_code = 200
-        post_response.text = "<html>Login status</html>"
+        post_response.text = '<html>Error: Invalid credentials<input type="password"></html>'
         session.post.return_value = post_response
 
-        # Base URL still shows login page (wrong credentials)
+        # Base URL also shows login page
         get_response = MagicMock()
         get_response.status_code = 200
         get_response.text = '<html><form><input type="password" name="pass"></form></html>'

@@ -272,30 +272,34 @@ class AuthHandler:
                 list(cookies_after.keys()) if cookies_after else "none",
             )
 
-            # Log snippet of form submission response to help debug auth failures
-            form_snippet = response.text[:300].replace("\n", " ").replace("\r", "")
-            _LOGGER.debug("Form response snippet: %s...", form_snippet)
+            # Check form submission response first - some modems (MB7621) return
+            # success page directly and don't use cookies. Base URL may always show login.
+            form_response_is_login = self._is_login_page(response.text)
+            _LOGGER.info(
+                "Form response: is_login_page=%s, size=%d bytes",
+                form_response_is_login,
+                len(response.text),
+            )
 
-            # Fetch base URL to check if we're authenticated
-            # The form action response (/goform/login) is often a status page, not the data page
-            # We need to check the actual data page to see if login succeeded
+            if not form_response_is_login:
+                # Form submission returned a non-login page - login succeeded!
+                # Don't check base URL as some modems (MB7621) always show login there
+                _LOGGER.info("Form auth successful - form response is not a login page")
+                return True, response.text
+
+            # Form submission returned login page - might be error or redirect
+            # Try fetching base URL to double-check (works for cookie-based auth)
             data_response = session.get(base_url, headers=headers, timeout=10)
             _LOGGER.info(
-                "Post-login base URL response: HTTP %d, %d bytes, has_password_field=%s",
+                "Post-login base URL: HTTP %d, %d bytes, is_login=%s",
                 data_response.status_code,
                 len(data_response.text),
                 self._is_login_page(data_response.text),
             )
 
             if data_response.status_code == 200:
-                # Check if we're still on a login page (auth failed)
                 if self._is_login_page(data_response.text):
-                    # Log snippet of response to help debug
-                    snippet = data_response.text[:500].replace("\n", " ").replace("\r", "")
-                    _LOGGER.warning(
-                        "Form auth failed - base URL still shows login page. Response snippet: %s...",
-                        snippet,
-                    )
+                    _LOGGER.warning("Form auth failed - still on login page after submission")
                     return False, None
                 _LOGGER.info("Form auth successful - base URL has no login form")
                 return True, data_response.text
