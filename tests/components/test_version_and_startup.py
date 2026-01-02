@@ -98,7 +98,7 @@ class TestVersionLogging:
 
     def test_current_version(self):
         """Test that version is the correct current version."""
-        assert VERSION == "3.11.0"
+        assert VERSION == "3.12.0"
 
 
 class TestParserSelectionOptimization:
