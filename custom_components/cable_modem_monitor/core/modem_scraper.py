@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ..parsers.base_parser import ModemParser
+from .auth.handler import AuthHandler
 from .discovery_helpers import (
     DiscoveryCircuitBreaker,
     ParserHeuristics,
@@ -76,6 +77,8 @@ class ModemScraper:
         parser_name: str | None = None,
         verify_ssl: bool = False,
         legacy_ssl: bool = False,
+        auth_strategy: str | None = None,
+        auth_form_config: dict[str, Any] | None = None,
     ):
         """
         Initialize the modem scraper.
@@ -89,6 +92,8 @@ class ModemScraper:
             parser_name: Name of cached parser to use (skips auto-detection)
             verify_ssl: Enable SSL certificate verification (default: False for compatibility with self-signed certs)
             legacy_ssl: Use legacy SSL ciphers (SECLEVEL=0) for older modem firmware
+            auth_strategy: Discovered auth strategy type (from config entry, v3.12.0+)
+            auth_form_config: Form configuration for form-based auth (from config entry, v3.12.0+)
         """
         self.host = host
         # Support both plain IP addresses and full URLs (http:// or https://)
@@ -152,6 +157,18 @@ class ModemScraper:
         self._captured_urls: list[dict[str, Any]] = []  # For HTML capture feature
         self._failed_urls: list[dict[str, Any]] = []  # Track failed fetches for diagnostics
         self._capture_enabled: bool = False  # Flag to enable HTML capture
+
+        # Auth strategy from config entry (v3.12.0+)
+        # This enables response-driven auth during polling
+        self._auth_handler = AuthHandler(
+            strategy=auth_strategy,
+            form_config=auth_form_config,
+        )
+        self._auth_strategy = auth_strategy
+        _LOGGER.debug(
+            "Scraper initialized with auth strategy: %s",
+            self._auth_handler.strategy.value if self._auth_handler else "none",
+        )
 
     def clear_auth_cache(self) -> None:
         """Clear cached authentication and create fresh session.
@@ -497,6 +514,9 @@ class ModemScraper:
         """
         Log in to the modem web interface.
 
+        Uses the auth handler with the stored strategy (v3.12.0+).
+        Falls back to parser hints or parser.login() for old config entries.
+
         Returns:
             tuple[bool, str | None]: (success, authenticated_html)
                 - success: True if login succeeded or no login required
@@ -506,11 +526,98 @@ class ModemScraper:
             _LOGGER.debug("No credentials provided, skipping login")
             return (True, None)
 
+        # Use auth handler if we have a stored strategy (v3.12.0+)
+        if self._auth_handler and self._auth_strategy:
+            _LOGGER.debug(
+                "Using auth handler with strategy: %s",
+                self._auth_handler.strategy.value,
+            )
+            success, html = self._auth_handler.authenticate(self.session, self.base_url, self.username, self.password)
+
+            # Transfer HNAP builder to parser for parse() and restart() methods
+            if success and self.parser:
+                hnap_builder = self._auth_handler.get_hnap_builder()
+                if hnap_builder:
+                    self.parser._json_builder = hnap_builder  # type: ignore[attr-defined]
+                    _LOGGER.debug("Transferred HNAP builder to parser for authenticated API calls")
+
+            return success, html
+
+        # No auth strategy stored - try parser hints fallback (v3.12.0)
+        if self.parser:
+            result = self._login_with_parser_hints()
+            if result is not None:
+                return result
+
+        # No parser hints - try legacy parser.login()
+        _LOGGER.debug("No auth strategy or parser hints, using legacy parser.login()")
         if not self.parser:
             _LOGGER.error("No parser detected, cannot log in")
             return (False, None)
 
         return self.parser.login(self.session, self.base_url, self.username, self.password)
+
+    def _login_with_parser_hints(self) -> tuple[bool, str | None] | None:
+        """
+        Attempt login using parser's auth hints (fallback for old config entries).
+
+        Returns:
+            tuple[bool, str | None] if hints were found and auth was attempted
+            None if no hints were found (caller should try legacy path)
+        """
+        if not self.parser:
+            return None
+
+        # Check for HNAP hints (S33, MB8611)
+        if hasattr(self.parser, "hnap_hints") and self.parser.hnap_hints:
+            hints = self.parser.hnap_hints
+            _LOGGER.debug("Using parser's hnap_hints for HNAP authentication")
+            temp_handler = AuthHandler(strategy="hnap_session", hnap_config=hints)
+            success, html = temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
+            # Transfer HNAP builder to parser for data fetches
+            if success:
+                hnap_builder = temp_handler.get_hnap_builder()
+                if hnap_builder:
+                    self.parser._json_builder = hnap_builder  # type: ignore[attr-defined]
+                    _LOGGER.debug("Transferred HNAP builder to parser")
+            return success, html
+
+        # Check for URL token hints (SB8200)
+        if hasattr(self.parser, "js_auth_hints") and self.parser.js_auth_hints:
+            hints = self.parser.js_auth_hints
+            _LOGGER.debug("Using parser's js_auth_hints for URL token authentication")
+            url_token_config = {
+                "login_page": hints.get("login_page", "/cmconnectionstatus.html"),
+                "login_prefix": hints.get("login_prefix", "login_"),
+                "session_cookie_name": hints.get("session_cookie_name", "credential"),
+                "data_page": hints.get("data_page", "/cmconnectionstatus.html"),
+                "token_prefix": hints.get("token_prefix", "ct_"),
+                "success_indicator": hints.get("success_indicator", "Downstream"),
+            }
+            temp_handler = AuthHandler(strategy="url_token_session", url_token_config=url_token_config)
+            return temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
+
+        # Check for form hints (MB7621, CGA2121, G54, CM2000)
+        if hasattr(self.parser, "auth_form_hints") and self.parser.auth_form_hints:
+            hints = self.parser.auth_form_hints
+            _LOGGER.debug("Using parser's auth_form_hints for form authentication")
+
+            # Determine auth strategy from hints
+            password_encoding = hints.get("password_encoding", "plain")
+            strategy = "form_base64" if password_encoding == "base64" else "form_plain"
+
+            # Build form_config from hints
+            form_config = {
+                "action": hints.get("login_url", ""),
+                "method": "POST",
+                "username_field": hints.get("username_field", "username"),
+                "password_field": hints.get("password_field", "password"),
+            }
+
+            temp_handler = AuthHandler(strategy=strategy, form_config=form_config)
+            return temp_handler.authenticate(self.session, self.base_url, self.username, self.password)
+
+        return None  # No hints found
 
     def _get_tier1_urls(self) -> list[tuple[str, str, type[ModemParser]]]:
         """Get URLs for Tier 1: User explicitly selected a parser."""
@@ -1048,8 +1155,9 @@ class ModemScraper:
         upstream = data.get("upstream", [])
         system_info = data.get("system_info", {})
 
-        total_corrected = sum(ch.get("corrected") or 0 for ch in downstream)
-        total_uncorrected = sum(ch.get("uncorrected") or 0 for ch in downstream)
+        # Only calculate totals if we have channel data - None indicates unavailable, not 0
+        total_corrected = sum(ch.get("corrected") or 0 for ch in downstream) if downstream else None
+        total_uncorrected = sum(ch.get("uncorrected") or 0 for ch in downstream) if downstream else None
 
         # Determine connection status
         # If fallback mode is active (unsupported modem), use "limited" status

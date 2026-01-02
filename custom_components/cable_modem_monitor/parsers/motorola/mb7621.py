@@ -13,12 +13,10 @@ Authentication: Form-based with Base64-encoded password
 
 from __future__ import annotations
 
-import base64
 import logging
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, FormAuthConfig
 from custom_components.cable_modem_monitor.lib.utils import extract_float, extract_number, parse_uptime_to_seconds
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -46,22 +44,15 @@ class MotorolaMB7621Parser(ModemParser):
     docsis_version = "3.0"
     fixtures_path = "tests/parsers/motorola/fixtures/mb7621"
 
-    # Auth handled by AuthDiscovery (v3.12.0+) - hints for non-standard form fields
-    # NOTE: MB7621 also requires Base64-encoded passwords. For now, keeping
-    # legacy login() until AuthDiscovery supports password encoding hints.
+    # Form auth hints for AuthDiscovery (v3.12.0+)
+    # MB7621 requires Base64-encoded passwords with non-standard field names
     auth_form_hints = {
         "username_field": "loginUsername",
         "password_field": "loginPassword",
+        "login_url": "/goform/login",
+        "password_encoding": "base64",  # MB7621 requires Base64-encoded passwords
+        "success_indicator": "10000",  # Response length > this indicates success
     }
-
-    # Legacy auth_config kept for backward compatibility during migration
-    auth_config = FormAuthConfig(
-        strategy=AuthStrategyType.FORM_PLAIN_AND_BASE64,
-        login_url="/goform/login",
-        username_field="loginUsername",
-        password_field="loginPassword",
-        success_indicator="10000",
-    )
 
     url_patterns = [
         {"path": "/MotoSwInfo.asp", "auth_method": "form", "auth_required": False},
@@ -84,110 +75,43 @@ class MotorolaMB7621Parser(ModemParser):
         # Check for MB7621-specific indicators in the HTML
         return "MB7621" in html or "MB 7621" in html or "2480-MB7621" in html
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """Log in to the modem using form-based authentication.
-
-        Returns:
-            tuple: (success: bool, authenticated_html: str)
-
-        Security Note:
-            MB7621 requires Base64-encoded passwords.
-            IMPORTANT: Base64 is NOT encryption - it is merely encoding and provides
-            NO security against interception or attacks. The password is still sent
-            in an easily reversible format. This is a modem firmware limitation.
-            Always use HTTPS connections when possible to protect credentials in transit.
-        """
-        if not username or not password:
-            _LOGGER.debug("No credentials provided, skipping login")
-            return True, None
-
-        login_url = f"{base_url}/goform/login"
-
-        # Try plain password first, then Base64-encoded (MB7621 requires Base64)
-        passwords_to_try = [
-            password,  # Plain password
-            base64.b64encode(password.encode("utf-8")).decode("utf-8"),  # Base64-encoded
-        ]
-
-        for attempt, pwd in enumerate(passwords_to_try, 1):
-            login_data = {
-                "loginUsername": username,
-                "loginPassword": pwd,
-            }
-            pwd_type = "plain" if attempt == 1 else "Base64-encoded"
-            _LOGGER.info("Attempting login to %s (password encoding: %s)", login_url, pwd_type)
-
-            response = session.post(login_url, data=login_data, timeout=10, allow_redirects=True)
-            _LOGGER.debug("Login response: status=%s, url=%s", response.status_code, response.url)
-
-            # Security check: Validate redirect stayed on same host or local network
-            import ipaddress
-            from urllib.parse import urlparse
-
-            if response.url != login_url:
-                response_parsed = urlparse(response.url)
-                login_parsed = urlparse(login_url)
-
-                if response_parsed.hostname != login_parsed.hostname:
-                    if login_parsed.hostname and response_parsed.hostname:
-                        try:
-                            login_ip = ipaddress.ip_address(login_parsed.hostname)
-                            response_ip = ipaddress.ip_address(response_parsed.hostname)
-
-                            if login_ip.is_private and response_ip.is_private:
-                                _LOGGER.debug(
-                                    "Allowing redirect within private network: %s -> %s",
-                                    login_parsed.hostname,
-                                    response_parsed.hostname,
-                                )
-                            else:
-                                _LOGGER.error(
-                                    "MB7621: Security violation - redirect to different public host: %s", response.url
-                                )
-                                return False, None
-                        except ValueError:
-                            _LOGGER.error(
-                                "MB7621: Security violation - redirect to different host: %s (from %s)",
-                                response_parsed.hostname,
-                                login_parsed.hostname,
-                            )
-                            return False, None
-                    else:
-                        _LOGGER.error(
-                            "MB7621: Security violation - redirect with missing hostname: %s (from %s)",
-                            response.url,
-                            login_url,
-                        )
-                        return False, None
-
-            test_response = session.get(f"{base_url}/MotoConnection.asp", timeout=10)
-            _LOGGER.debug(
-                "Login verification: test page status=%s, length=%s", test_response.status_code, len(test_response.text)
-            )
-
-            if test_response.status_code == 200 and len(test_response.text) > 10000:
-                _LOGGER.info("Login successful using %s password (got %s bytes)", pwd_type, len(test_response.text))
-                return True, test_response.text
-
-        _LOGGER.error("Login failed with both plain and Base64-encoded passwords")
-        return False, None
-
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the modem."""
         system_info = self._parse_system_info(soup)
 
-        # If software version not found, try fetching MotoHome.asp
+        # Check if we have the connection page with channel data
+        # If not (e.g., we got the public info page or login response), fetch MotoConnection.asp
+        # MotoConnection.asp has channel data AND system uptime (but NOT software_version)
+        tables_found = soup.find_all("table", class_="moto-table-content")
+        if not tables_found and session and base_url:
+            _LOGGER.debug("No channel tables found, fetching MotoConnection.asp for channel data")
+            try:
+                conn_response = session.get(f"{base_url}/MotoConnection.asp", timeout=10)
+                if conn_response.status_code == 200:
+                    soup = BeautifulSoup(conn_response.text, "html.parser")
+                    _LOGGER.debug("Fetched MotoConnection.asp (%d bytes)", len(conn_response.text))
+                    # MotoConnection.asp contains uptime - update system_info
+                    conn_info = self._parse_system_info(soup)
+                    system_info.update(conn_info)
+                    _LOGGER.debug("Updated system_info from MotoConnection.asp: %s", conn_info)
+                else:
+                    _LOGGER.warning("Failed to fetch MotoConnection.asp: status %d", conn_response.status_code)
+            except Exception as e:
+                _LOGGER.error("Failed to fetch MotoConnection.asp: %s", e)
+
+        # Fetch MotoHome.asp if software version is still missing
+        # (MotoConnection.asp has uptime but NOT software_version)
         if not system_info.get("software_version") and session and base_url:
             try:
-                _LOGGER.debug("Software version not found on connection page, fetching MotoHome.asp")
+                _LOGGER.debug("Software version not found, fetching MotoHome.asp")
                 home_response = session.get(f"{base_url}/MotoHome.asp", timeout=10)
                 if home_response.status_code == 200:
                     home_soup = BeautifulSoup(home_response.text, "html.parser")
                     home_info = self._parse_system_info(home_soup)
                     system_info.update(home_info)
-                    _LOGGER.debug("Fetched system info from MotoHome.asp: %s", home_info)
+                    _LOGGER.debug("Updated system_info from MotoHome.asp: %s", home_info)
             except Exception as e:
-                _LOGGER.error("Failed to fetch system info from MotoHome.asp: %s", e)
+                _LOGGER.error("Failed to fetch MotoHome.asp: %s", e)
 
         downstream_channels = self._parse_downstream(soup, system_info)
         upstream_channels = self._parse_upstream(soup, system_info)

@@ -8,11 +8,6 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import (
-    AuthFactory,
-    AuthStrategyType,
-    UrlTokenSessionConfig,
-)
 from custom_components.cable_modem_monitor.lib.utils import extract_float, extract_number
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -54,25 +49,17 @@ class ArrisSB8200Parser(ModemParser):
     # Priority - model-specific parser
     priority = 100
 
-    # Auth handled by AuthDiscovery (v3.12.0+) - hints for JS-based URL token auth
-    # NOTE: SB8200 manages session tokens used in data fetching.
-    # Keeping legacy login() until scraper handles token storage.
+    # URL token session config for AuthDiscovery (v3.12.0+)
+    # SB8200 uses URL-based token auth with session cookies
     js_auth_hints = {
         "pattern": "url_token_session",
+        "login_page": "/cmconnectionstatus.html",
         "login_prefix": "login_",
+        "session_cookie_name": "sessionId",
+        "data_page": "/cmconnectionstatus.html",
         "token_prefix": "ct_",
+        "success_indicator": "Downstream Bonded Channels",
     }
-
-    # Legacy auth_config kept for backward compatibility during migration
-    auth_config = UrlTokenSessionConfig(
-        strategy=AuthStrategyType.URL_TOKEN_SESSION,
-        login_page="/cmconnectionstatus.html",
-        data_page="/cmconnectionstatus.html",
-        login_prefix="login_",
-        token_prefix="ct_",
-        session_cookie_name="sessionId",
-        success_indicator="Downstream Bonded Channels",
-    )
 
     url_patterns = [
         {"path": "/", "auth_method": "none", "auth_required": False},
@@ -98,67 +85,9 @@ class ArrisSB8200Parser(ModemParser):
     VARIANT_HTTPS_NO_AUTH_FALLBACK = "https_no_auth_fallback"
 
     def __init__(self):
-        """Initialize parser with session token and variant tracking."""
+        """Initialize parser with variant tracking."""
         super().__init__()
-        self._session_token: str | None = None
         self._auth_variant: str | None = None
-
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """Authenticate to ARRIS SB8200.
-
-        Behavior is credential-driven with protocol awareness:
-        - No credentials + HTTP: Normal no-auth variant
-        - No credentials + HTTPS: Warning logged (may fail)
-        - Credentials provided: URL token session auth with fallback
-
-        Args:
-            session: requests.Session object
-            base_url: Modem base URL (e.g., "https://192.168.100.1")
-            username: Username (typically "admin")
-            password: Password (typically last 8 chars of serial number)
-
-        Returns:
-            Tuple of (success, response_html_or_error)
-        """
-        is_https = base_url.startswith("https://")
-
-        # No credentials provided - assume no-auth variant
-        if not username or not password:
-            self._auth_variant = self.VARIANT_HTTP_NO_AUTH
-            if is_https:
-                _LOGGER.warning(
-                    "SB8200: HTTPS URL but no credentials provided - "
-                    "authentication may be required for this firmware variant"
-                )
-            else:
-                _LOGGER.info("SB8200: Using HTTP variant (no auth required)")
-            return (True, None)
-
-        # Credentials provided - use URL token session auth strategy
-        self._auth_variant = self.VARIANT_HTTPS_TOKEN_SESSION
-        _LOGGER.info("SB8200: Using HTTPS variant (URL token session auth)")
-
-        auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
-        success, response_html = auth_strategy.login(session, base_url, username, password, self.auth_config)
-
-        # Store session token for subsequent requests (e.g., fetching cmswinfo.html)
-        if success:
-            self._session_token = session.cookies.get(self.auth_config.session_cookie_name)
-            if self._session_token:
-                _LOGGER.debug("SB8200: Stored session token for subsequent requests")
-            return (success, response_html)
-
-        # Auth failed - try graceful fallback to unauthenticated fetch
-        # Some firmware may not require auth even over HTTPS
-        if not success and response_html and "401" not in str(response_html):
-            _LOGGER.info("SB8200: Token auth failed, attempting unauthenticated fallback")
-            fallback_html = self._try_unauthenticated_fetch(session, base_url)
-            if fallback_html:
-                self._auth_variant = self.VARIANT_HTTPS_NO_AUTH_FALLBACK
-                _LOGGER.info("SB8200: Unauthenticated fallback succeeded")
-                return (True, fallback_html)
-
-        return (success, response_html)
 
     def _try_unauthenticated_fetch(self, session, base_url: str) -> str | None:
         """Attempt to fetch data without authentication as fallback.
@@ -171,27 +100,32 @@ class ArrisSB8200Parser(ModemParser):
             HTML content if successful, None otherwise
         """
         try:
-            url = f"{base_url}{self.auth_config.data_page}"
+            url = f"{base_url}{self.js_auth_hints['data_page']}"
             response = session.get(url, timeout=10, verify=False)
-            if response.status_code == 200 and self.auth_config.success_indicator in response.text:
+            if response.status_code == 200 and self.js_auth_hints["success_indicator"] in response.text:
                 return str(response.text)
         except Exception as e:
             _LOGGER.debug("SB8200: Unauthenticated fallback failed: %s", e)
         return None
 
-    def _build_authenticated_url(self, base_url: str, path: str) -> str:
+    def _build_authenticated_url(self, base_url: str, path: str, session=None) -> str:
         """Build URL with session token if available.
 
         Args:
             base_url: Base URL (e.g., "https://192.168.100.1")
             path: Path to request (e.g., "/cmswinfo.html")
+            session: requests.Session to get token from cookies
 
         Returns:
             URL with session token appended if available, otherwise plain URL
         """
         url = f"{base_url}{path}"
-        if self._session_token:
-            url = f"{url}?{self.auth_config.token_prefix}{self._session_token}"
+        # Get session token from cookies (set by AuthHandler during authentication)
+        session_token = None
+        if session:
+            session_token = session.cookies.get(self.js_auth_hints["session_cookie_name"])
+        if session_token:
+            url = f"{url}?{self.js_auth_hints['token_prefix']}{session_token}"
             _LOGGER.debug("SB8200: Using session token for %s", path)
         return url
 
@@ -204,8 +138,8 @@ class ArrisSB8200Parser(ModemParser):
         # Fetch product info page for uptime and version info
         if session and base_url:
             try:
-                url = self._build_authenticated_url(base_url, "/cmswinfo.html")
-                # Session already has cookies/auth from login
+                url = self._build_authenticated_url(base_url, "/cmswinfo.html", session)
+                # Session already has cookies/auth from AuthHandler
                 response = session.get(url, timeout=10, verify=False)
                 if response.status_code == 200:
                     info_soup = BeautifulSoup(response.text, "html.parser")

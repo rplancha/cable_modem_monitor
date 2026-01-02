@@ -8,9 +8,6 @@ import logging
 from bs4 import BeautifulSoup
 
 from custom_components.cable_modem_monitor.core.auth import (
-    AuthFactory,
-    AuthStrategyType,
-    HNAPAuthConfig,
     HNAPJsonRequestBuilder,
     HNAPRequestBuilder,
 )
@@ -43,14 +40,13 @@ class MotorolaMB8611HnapParser(ModemParser):
         # Store the JSON builder instance to preserve private_key across login/parse calls
         self._json_builder: HNAPJsonRequestBuilder | None = None
 
-    # HNAP authentication configuration
-    auth_config = HNAPAuthConfig(
-        strategy=AuthStrategyType.HNAP_SESSION,
-        login_url="/Login.html",
-        hnap_endpoint="/HNAP1/",
-        session_timeout_indicator="UN-AUTH",
-        soap_action_namespace="http://purenetworks.com/HNAP1/",
-    )
+    # HNAP configuration hints for AuthDiscovery (v3.12.0+)
+    # MB8611 uses empty dict {} for action values (default behavior)
+    hnap_hints: dict[str, str | dict] = {
+        "endpoint": "/HNAP1/",
+        "namespace": "http://purenetworks.com/HNAP1/",
+        "empty_action_value": {},  # MB8611 default: uses {} not "" like S33
+    }
 
     url_patterns = [
         {"path": "/HNAP1/", "auth_method": "hnap", "auth_required": True},
@@ -78,46 +74,6 @@ class MotorolaMB8611HnapParser(ModemParser):
             or "2251-MB8611" in html
             or (("HNAP" in html or "purenetworks.com/HNAP1" in html) and "Motorola" in html)
         )
-
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """
-        Log in using HNAP authentication (tries JSON first, then XML/SOAP).
-
-        Some MB8611 firmware variants use JSON-formatted HNAP authentication,
-        while others use XML/SOAP. This method tries both.
-
-        Note: This method is maintained for backward compatibility.
-        New code should use auth_config with AuthFactory instead.
-        """
-        # Try JSON-based HNAP login first
-        # Store the builder instance so the private_key persists for subsequent parse() calls
-        self._json_builder = HNAPJsonRequestBuilder(
-            endpoint=self.auth_config.hnap_endpoint, namespace=self.auth_config.soap_action_namespace
-        )
-
-        _LOGGER.debug("MB8611: Attempting JSON-based HNAP login")
-        success: bool
-        response: str | None
-        success, response = self._json_builder.login(session, base_url, username, password)
-
-        if success:
-            _LOGGER.info("MB8611: JSON HNAP login successful")
-            return (True, response)
-
-        # JSON login failed - clear the builder so parse() doesn't try to use it
-        self._json_builder = None
-
-        # Fall back to XML/SOAP-based HNAP login
-        _LOGGER.debug("MB8611: JSON login failed, trying XML/SOAP-based HNAP login")
-        auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
-        success, response = auth_strategy.login(session, base_url, username, password, self.auth_config)
-
-        if success:
-            _LOGGER.info("MB8611: XML/SOAP HNAP login successful")
-        else:
-            _LOGGER.warning("MB8611: Both JSON and XML/SOAP HNAP login methods failed")
-
-        return (success, response)
 
     def _is_auth_failure(self, error: Exception) -> bool:
         """
@@ -213,7 +169,9 @@ class MotorolaMB8611HnapParser(ModemParser):
             _LOGGER.debug("MB8611: Reusing JSON builder from login (private_key preserved)")
         else:
             builder = HNAPJsonRequestBuilder(
-                endpoint=self.auth_config.hnap_endpoint, namespace=self.auth_config.soap_action_namespace
+                endpoint=str(self.hnap_hints["endpoint"]),
+                namespace=str(self.hnap_hints["namespace"]),
+                empty_action_value=self.hnap_hints.get("empty_action_value", {}),
             )
             _LOGGER.warning("MB8611: No stored JSON builder - creating new one (may lack auth)")
 
@@ -266,7 +224,8 @@ class MotorolaMB8611HnapParser(ModemParser):
 
         # Build XML/SOAP HNAP request builder
         builder = HNAPRequestBuilder(
-            endpoint=self.auth_config.hnap_endpoint, namespace=self.auth_config.soap_action_namespace
+            endpoint=str(self.hnap_hints["endpoint"]),
+            namespace=str(self.hnap_hints["namespace"]),
         )
 
         # Make batched HNAP request for all data
@@ -532,8 +491,9 @@ class MotorolaMB8611HnapParser(ModemParser):
                 builder = self._json_builder
             else:
                 builder = HNAPJsonRequestBuilder(
-                    endpoint=self.auth_config.hnap_endpoint,
-                    namespace=self.auth_config.soap_action_namespace,
+                    endpoint=str(self.hnap_hints["endpoint"]),
+                    namespace=str(self.hnap_hints["namespace"]),
+                    empty_action_value=self.hnap_hints.get("empty_action_value", {}),
                 )
                 _LOGGER.warning("MB8611: No stored JSON builder for restart - may lack auth")
 

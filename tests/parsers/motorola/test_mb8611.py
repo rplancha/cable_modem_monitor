@@ -10,8 +10,6 @@ import pytest
 from bs4 import BeautifulSoup
 
 from custom_components.cable_modem_monitor.core.auth import (
-    AuthStrategyType,
-    HNAPAuthConfig,
     HNAPJsonRequestBuilder,
     HNAPRequestBuilder,
 )
@@ -88,19 +86,17 @@ class TestDetection:
         assert parser.can_parse(soup, "http://192.168.100.1", html) is False
 
 
-class TestAuthentication:
-    """Test HNAP authentication."""
+class TestHnapHints:
+    """Test HNAP hints configuration (v3.12.0+)."""
 
-    def test_has_hnap_auth_config(self):
-        """Test that parser has HNAP authentication config."""
+    def test_has_hnap_hints(self):
+        """Test that parser has HNAP hints for AuthDiscovery."""
         parser = MotorolaMB8611HnapParser()
 
-        assert parser.auth_config is not None
-        assert isinstance(parser.auth_config, HNAPAuthConfig)
-        assert parser.auth_config.strategy == AuthStrategyType.HNAP_SESSION
-        assert parser.auth_config.login_url == "/Login.html"
-        assert parser.auth_config.hnap_endpoint == "/HNAP1/"
-        assert parser.auth_config.soap_action_namespace == "http://purenetworks.com/HNAP1/"
+        assert parser.hnap_hints is not None
+        assert parser.hnap_hints["endpoint"] == "/HNAP1/"
+        assert parser.hnap_hints["namespace"] == "http://purenetworks.com/HNAP1/"
+        assert parser.hnap_hints["empty_action_value"] == {}
 
     def test_url_patterns_require_hnap_auth(self):
         """Test that URL patterns require HNAP authentication."""
@@ -110,25 +106,6 @@ class TestAuthentication:
         for pattern in parser.url_patterns:
             assert pattern["auth_method"] == "hnap"
             assert pattern["auth_required"] is True
-
-    def test_login_uses_auth_factory(self):
-        """Test that login delegates to AuthFactory."""
-        parser = MotorolaMB8611HnapParser()
-        mock_session = Mock()
-        base_url = "http://192.168.100.1"
-
-        # Mock AuthFactory where it's imported, not where it's defined
-        auth_path = "custom_components.cable_modem_monitor.parsers.motorola.mb8611.AuthFactory"
-        with patch(auth_path) as mock_factory:
-            mock_strategy = Mock()
-            mock_strategy.login.return_value = (True, "Login successful")
-            mock_factory.get_strategy.return_value = mock_strategy
-
-            success, message = parser.login(mock_session, base_url, "admin", "password")
-
-            assert success is True
-            assert message == "Login successful"
-            mock_factory.get_strategy.assert_called_once_with(AuthStrategyType.HNAP_SESSION)
 
 
 class TestHnapParsing:
@@ -463,45 +440,11 @@ class TestMetadata:
 
 
 class TestJsonHnapSupport:
-    """Test JSON-based HNAP support for firmware variants that use JSON instead of XML/SOAP."""
+    """Test JSON-based HNAP support for firmware variants that use JSON instead of XML/SOAP.
 
-    def test_json_hnap_login_success(self):
-        """Test that JSON HNAP login succeeds and returns proper response."""
-        parser = MotorolaMB8611HnapParser()
-        mock_session = Mock()
-        base_url = "https://192.168.100.1"
-
-        # Mock successful JSON HNAP login
-        with patch.object(
-            HNAPJsonRequestBuilder, "login", return_value=(True, '{"LoginResponse":{"LoginResult":"OK"}}')
-        ):
-            success, response = parser.login(mock_session, base_url, "admin", "password")
-
-            assert success is True
-            assert response is not None
-            assert "LoginResponse" in response
-
-    def test_json_hnap_login_fallback_to_xml(self):
-        """Test that login falls back to XML/SOAP when JSON fails."""
-        parser = MotorolaMB8611HnapParser()
-        mock_session = Mock()
-        base_url = "https://192.168.100.1"
-
-        # Mock JSON login failure, XML/SOAP login success
-        # Patch where imports are used, not where they're defined
-        json_builder_path = "custom_components.cable_modem_monitor.parsers.motorola.mb8611.HNAPJsonRequestBuilder"
-        auth_path = "custom_components.cable_modem_monitor.parsers.motorola.mb8611.AuthFactory"
-        with patch(json_builder_path) as mock_json_builder, patch(auth_path) as mock_factory:
-            # mock_json_builder is the class, .return_value is the instance created by ()
-            mock_json_builder.return_value.login.return_value = (False, "")
-            mock_strategy = Mock()
-            mock_strategy.login.return_value = (True, "XML Login OK")
-            mock_factory.get_strategy.return_value = mock_strategy
-
-            success, response = parser.login(mock_session, base_url, "admin", "password")
-
-            assert success is True
-            assert response == "XML Login OK"
+    Note: As of v3.12.0, login() is handled by AuthHandler, not parser.
+    Login tests moved to tests/core/test_auth_handler.py.
+    """
 
     def test_json_hnap_parse_success(self, hnap_full_status):
         """Test parsing modem data using JSON HNAP."""

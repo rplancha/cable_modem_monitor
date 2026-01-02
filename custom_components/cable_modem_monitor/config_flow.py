@@ -13,6 +13,11 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     CONF_ACTUAL_MODEL,
+    CONF_AUTH_DISCOVERY_ERROR,
+    CONF_AUTH_DISCOVERY_FAILED,
+    CONF_AUTH_DISCOVERY_STATUS,
+    CONF_AUTH_FORM_CONFIG,
+    CONF_AUTH_STRATEGY,
     CONF_DETECTED_MANUFACTURER,
     CONF_DETECTED_MODEM,
     CONF_DETECTION_METHOD,
@@ -33,6 +38,7 @@ from .const import (
     MIN_SCAN_INTERVAL,
     VERIFY_SSL,
 )
+from .core.auth.discovery import AuthDiscovery, AuthStrategyType, DiscoveryResult
 from .core.discovery_helpers import ParserNotFoundError
 from .core.modem_scraper import ModemScraper
 from .parsers import get_parsers
@@ -364,6 +370,127 @@ def _detect_legacy_ssl_sync(host: str) -> bool:
         return False
 
 
+def _run_auth_discovery_sync(
+    host: str,
+    username: str | None,
+    password: str | None,
+    legacy_ssl: bool,
+) -> dict[str, Any]:
+    """Run auth discovery synchronously (for executor).
+
+    Discovers the authentication strategy for a modem before parser detection.
+    This runs BEFORE parser selection so we don't have a parser yet.
+
+    Args:
+        host: Modem IP address or hostname
+        username: Optional username for authentication
+        password: Optional password for authentication
+        legacy_ssl: Whether to use legacy SSL ciphers
+
+    Returns:
+        Dictionary with auth discovery results:
+        - auth_strategy: Discovered strategy type (as string)
+        - auth_form_config: Form config dict if form auth (or None)
+        - auth_discovery_status: "success", "unknown", or "error"
+        - auth_discovery_error: Error message if failed (or None)
+        - authenticated_session: requests.Session with auth applied (or None)
+        - authenticated_html: HTML from authenticated response (or None)
+    """
+    import requests
+
+    # Build base URL - try HTTPS first like main scraper
+    if host.startswith(("http://", "https://")):
+        base_url = host.rstrip("/")
+    else:
+        base_url = f"https://{host}"
+
+    # Create session with SSL settings
+    session = requests.Session()
+    if legacy_ssl and base_url.startswith("https://"):
+        from .core.ssl_adapter import LegacySSLAdapter
+
+        session.mount("https://", LegacySSLAdapter())
+        _LOGGER.debug("Auth discovery using legacy SSL ciphers")
+
+    # Disable SSL verification for self-signed modem certs
+    session.verify = VERIFY_SSL
+
+    # Suppress SSL warnings for the session
+    import urllib3
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    result: dict[str, Any] = {
+        "auth_strategy": AuthStrategyType.UNKNOWN.value,
+        "auth_form_config": None,
+        "auth_discovery_status": "unknown",
+        "auth_discovery_error": None,
+        "authenticated_session": None,
+        "authenticated_html": None,
+    }
+
+    # If no credentials provided, assume no auth needed
+    if not username and not password:
+        _LOGGER.info("No credentials provided, assuming NO_AUTH strategy")
+        result["auth_strategy"] = AuthStrategyType.NO_AUTH.value
+        result["auth_discovery_status"] = "success"
+        result["authenticated_session"] = session
+        return result
+
+    try:
+        # Run auth discovery without a parser (parser detection happens later)
+        discovery = AuthDiscovery()
+        discovery_result: DiscoveryResult = discovery.discover(
+            session=session,
+            base_url=base_url,
+            data_url=base_url,  # Will be refined by parser later
+            username=username or "",
+            password=password or "",
+            parser=None,  # No parser yet - just discovering auth strategy
+        )
+
+        # Store strategy (may be None if discovery failed)
+        if discovery_result.strategy:
+            result["auth_strategy"] = discovery_result.strategy.value
+        result["authenticated_html"] = discovery_result.response_html
+
+        if discovery_result.form_config:
+            # Serialize form config for storage
+            result["auth_form_config"] = {
+                "action": discovery_result.form_config.action,
+                "method": discovery_result.form_config.method,
+                "username_field": discovery_result.form_config.username_field,
+                "password_field": discovery_result.form_config.password_field,
+                "hidden_fields": discovery_result.form_config.hidden_fields,
+            }
+
+        # Session is modified in place by auth discovery
+        result["authenticated_session"] = session
+
+        if discovery_result.error_message:
+            result["auth_discovery_status"] = "error"
+            result["auth_discovery_error"] = discovery_result.error_message
+            _LOGGER.warning("Auth discovery error: %s", discovery_result.error_message)
+        elif discovery_result.strategy is None:
+            result["auth_discovery_status"] = "unknown"
+            _LOGGER.warning("Auth discovery returned no strategy - will fall back to parser.login()")
+        else:
+            result["auth_discovery_status"] = "success"
+            _LOGGER.info(
+                "Auth discovery successful: strategy=%s",
+                discovery_result.strategy.value,
+            )
+
+    except Exception as e:
+        _LOGGER.error("Auth discovery failed with exception: %s", e)
+        result["auth_discovery_status"] = "error"
+        result["auth_discovery_error"] = str(e)
+        # Return session anyway so scraper can fall back to parser.login()
+        result["authenticated_session"] = session
+
+    return result
+
+
 async def _test_icmp_ping(host: str) -> bool:
     """Test if ICMP ping works for the given host.
 
@@ -411,6 +538,18 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         _LOGGER.error("Connectivity check failed for %s: %s", host, error_msg)
         raise CannotConnectError(error_msg)
 
+    # Step 2 (v3.12.0+): Run auth discovery BEFORE parser detection
+    # This discovers the authentication strategy based on HTTP response analysis
+    username = data.get(CONF_USERNAME)
+    password = data.get(CONF_PASSWORD)
+    _LOGGER.info("Running auth discovery for %s...", host)
+    auth_result = await hass.async_add_executor_job(_run_auth_discovery_sync, host, username, password, legacy_ssl)
+    _LOGGER.info(
+        "Auth discovery result: strategy=%s, status=%s",
+        auth_result.get("auth_strategy"),
+        auth_result.get("auth_discovery_status"),
+    )
+
     # Get parsers and select appropriate one(s)
     all_parsers = await hass.async_add_executor_job(get_parsers)
     selected_parser, parser_name_hint = _select_parser_for_validation(
@@ -429,6 +568,13 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         verify_ssl=VERIFY_SSL,
         legacy_ssl=legacy_ssl,
     )
+
+    # If auth discovery provided an authenticated session, use it
+    # This allows parser detection to work on authenticated HTML
+    authenticated_session = auth_result.get("authenticated_session")
+    if authenticated_session:
+        _LOGGER.debug("Using authenticated session from auth discovery")
+        scraper.session = authenticated_session
 
     # Connect and validate
     _LOGGER.info("Detecting modem at %s...", host)
@@ -456,6 +602,12 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         "detection_info": detection_info,
         "supports_icmp": supports_icmp,
         "legacy_ssl": legacy_ssl,
+        # Auth discovery results (v3.12.0+)
+        CONF_AUTH_STRATEGY: auth_result.get("auth_strategy"),
+        CONF_AUTH_FORM_CONFIG: auth_result.get("auth_form_config"),
+        CONF_AUTH_DISCOVERY_STATUS: auth_result.get("auth_discovery_status"),
+        CONF_AUTH_DISCOVERY_FAILED: auth_result.get("auth_discovery_status") != "success",
+        CONF_AUTH_DISCOVERY_ERROR: auth_result.get("auth_discovery_error"),
     }
 
 
@@ -658,6 +810,19 @@ class CableModemMonitorConfigFlow(config_entries.ConfigFlow):
                 # User explicitly selected a parser from dropdown
                 user_input[CONF_DETECTION_METHOD] = "user_selected"
 
+        # Store auth discovery results (v3.12.0+)
+        # These are used by the scraper during polling to apply the correct auth strategy
+        if info.get(CONF_AUTH_STRATEGY):
+            user_input[CONF_AUTH_STRATEGY] = info[CONF_AUTH_STRATEGY]
+        if info.get(CONF_AUTH_FORM_CONFIG):
+            user_input[CONF_AUTH_FORM_CONFIG] = info[CONF_AUTH_FORM_CONFIG]
+        if info.get(CONF_AUTH_DISCOVERY_STATUS):
+            user_input[CONF_AUTH_DISCOVERY_STATUS] = info[CONF_AUTH_DISCOVERY_STATUS]
+        if info.get(CONF_AUTH_DISCOVERY_FAILED) is not None:
+            user_input[CONF_AUTH_DISCOVERY_FAILED] = info[CONF_AUTH_DISCOVERY_FAILED]
+        if info.get(CONF_AUTH_DISCOVERY_ERROR):
+            user_input[CONF_AUTH_DISCOVERY_ERROR] = info[CONF_AUTH_DISCOVERY_ERROR]
+
         return self.async_create_entry(title=info["title"], data=user_input)
 
     async def async_step_user_with_errors(
@@ -737,6 +902,25 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if not user_input.get(CONF_USERNAME):
             user_input[CONF_USERNAME] = self.config_entry.data.get(CONF_USERNAME, "")
 
+    def _update_auth_discovery_info(self, user_input: dict[str, Any], info: dict) -> None:
+        """Update auth discovery results from validation (v3.12.0+)."""
+        if info.get(CONF_AUTH_STRATEGY):
+            user_input[CONF_AUTH_STRATEGY] = info[CONF_AUTH_STRATEGY]
+        elif self.config_entry.data.get(CONF_AUTH_STRATEGY):
+            user_input[CONF_AUTH_STRATEGY] = self.config_entry.data.get(CONF_AUTH_STRATEGY)
+
+        if info.get(CONF_AUTH_FORM_CONFIG):
+            user_input[CONF_AUTH_FORM_CONFIG] = info[CONF_AUTH_FORM_CONFIG]
+        elif self.config_entry.data.get(CONF_AUTH_FORM_CONFIG):
+            user_input[CONF_AUTH_FORM_CONFIG] = self.config_entry.data.get(CONF_AUTH_FORM_CONFIG)
+
+        if info.get(CONF_AUTH_DISCOVERY_STATUS):
+            user_input[CONF_AUTH_DISCOVERY_STATUS] = info[CONF_AUTH_DISCOVERY_STATUS]
+        if info.get(CONF_AUTH_DISCOVERY_FAILED) is not None:
+            user_input[CONF_AUTH_DISCOVERY_FAILED] = info[CONF_AUTH_DISCOVERY_FAILED]
+        if info.get(CONF_AUTH_DISCOVERY_ERROR):
+            user_input[CONF_AUTH_DISCOVERY_ERROR] = info[CONF_AUTH_DISCOVERY_ERROR]
+
     def _update_detection_info(self, user_input: dict[str, Any], info: dict) -> None:
         """Update user input with detection info from validation."""
         # Always update ICMP support - it's re-tested on every validation
@@ -786,6 +970,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             user_input[CONF_LAST_DETECTION] = self.config_entry.data.get(CONF_LAST_DETECTION)
             user_input[CONF_ACTUAL_MODEL] = self.config_entry.data.get(CONF_ACTUAL_MODEL)
             user_input[CONF_DETECTION_METHOD] = self.config_entry.data.get(CONF_DETECTION_METHOD)
+
+        # Update auth discovery results (v3.12.0+)
+        self._update_auth_discovery_info(user_input, info)
 
     def _create_config_message(self, user_input: dict[str, Any]) -> str:
         """Create configuration message from detected modem info."""

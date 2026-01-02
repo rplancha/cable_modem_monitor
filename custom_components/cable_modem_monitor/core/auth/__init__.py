@@ -27,10 +27,7 @@ Usage:
 
 from __future__ import annotations
 
-# Base classes
 from .base import AuthResult, AuthStrategy
-
-# Configuration dataclasses
 from .configs import (
     AuthConfig,
     BasicAuthConfig,
@@ -40,17 +37,10 @@ from .configs import (
     RedirectFormAuthConfig,
     UrlTokenSessionConfig,
 )
-
-# Discovery (v3.12.0+)
 from .discovery import AuthDiscovery, DiscoveredFormConfig, DiscoveryResult
-
-# Factory
 from .factory import AuthFactory
-
-# HNAP builders
+from .handler import AuthHandler
 from .hnap import HNAPJsonRequestBuilder, HNAPRequestBuilder
-
-# Strategy classes (for direct instantiation if needed)
 from .strategies import (
     BasicHttpAuthStrategy,
     FormBase64AuthStrategy,
@@ -61,8 +51,6 @@ from .strategies import (
     RedirectFormAuthStrategy,
     UrlTokenSessionStrategy,
 )
-
-# Types and enums
 from .types import AuthStrategyType
 
 __all__ = [
@@ -83,6 +71,8 @@ __all__ = [
     "AuthDiscovery",
     "DiscoveredFormConfig",
     "DiscoveryResult",
+    # Handler
+    "AuthHandler",
     # Factory
     "AuthFactory",
     # Strategies

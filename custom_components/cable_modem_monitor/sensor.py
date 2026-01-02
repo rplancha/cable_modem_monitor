@@ -356,9 +356,10 @@ class ModemTotalCorrectedSensor(ModemSensorBase):
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         """Return the state of the sensor."""
-        return int(self.coordinator.data.get("cable_modem_total_corrected", 0))
+        value = self.coordinator.data.get("cable_modem_total_corrected")
+        return int(value) if value is not None else None
 
 
 class ModemTotalUncorrectedSensor(ModemSensorBase):
@@ -373,9 +374,10 @@ class ModemTotalUncorrectedSensor(ModemSensorBase):
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         """Return the state of the sensor."""
-        return int(self.coordinator.data.get("cable_modem_total_uncorrected", 0))
+        value = self.coordinator.data.get("cable_modem_total_uncorrected")
+        return int(value) if value is not None else None
 
 
 class ModemDownstreamPowerSensor(ModemSensorBase):

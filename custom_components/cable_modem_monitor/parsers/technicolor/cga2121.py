@@ -75,6 +75,24 @@ class TechnicolorCGA2121Parser(ModemParser):
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the CGA2121 modem."""
+        # Check if we have the DOCSIS status page with channel data
+        # If not (e.g., we got a login page), fetch st_docsis.html
+        has_channel_headers = soup.find("h2", string=lambda t: t and "Downstream Channels" in t) or soup.find(
+            "span", {"data-i18n": "ds_link_downstream_channels"}
+        )
+
+        if not has_channel_headers and session and base_url:
+            _LOGGER.debug("No channel headers found, fetching st_docsis.html for channel data")
+            try:
+                docsis_response = session.get(f"{base_url}/st_docsis.html", timeout=10)
+                if docsis_response.status_code == 200:
+                    soup = BeautifulSoup(docsis_response.text, "html.parser")
+                    _LOGGER.debug("Fetched st_docsis.html (%d bytes)", len(docsis_response.text))
+                else:
+                    _LOGGER.warning("Failed to fetch st_docsis.html: status %d", docsis_response.status_code)
+            except Exception as e:
+                _LOGGER.error("Failed to fetch st_docsis.html: %s", e)
+
         downstream_channels = self._parse_downstream(soup)
         upstream_channels = self._parse_upstream(soup)
         system_info = self._parse_system_info(soup)

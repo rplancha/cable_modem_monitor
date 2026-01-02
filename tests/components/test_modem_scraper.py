@@ -1154,11 +1154,19 @@ class TestLoginFlow:
         assert result == (False, None)
 
     def test_login_calls_parser_login(self, mocker):
-        """Test that login delegates to parser.login()."""
+        """Test that login delegates to parser.login() when no auth_form_hints.
+
+        NOTE (v3.12.0): Parsers with auth_form_hints use AuthHandler instead.
+        This test verifies the fallback path for parsers without hints.
+        """
         scraper = ModemScraper("192.168.100.1", username="admin", password="secret")
 
         mock_parser = mocker.Mock()
         mock_parser.login.return_value = (True, "<html>Logged in</html>")
+        # Explicitly set no hints to ensure fallback to parser.login()
+        mock_parser.hnap_hints = None
+        mock_parser.js_auth_hints = None
+        mock_parser.auth_form_hints = None
         scraper.parser = mock_parser
 
         result = scraper._login()

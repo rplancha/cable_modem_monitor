@@ -499,20 +499,20 @@ class TestS33SystemInfoParsing:
         assert system_info["internet_connection"] == "Connected"
 
 
-class TestS33AuthConfig:
-    """Test authentication configuration."""
+class TestS33HnapHints:
+    """Test HNAP hints configuration (v3.12.0+)."""
 
-    def test_auth_config_hnap_endpoint(self):
+    def test_hnap_hints_endpoint(self):
         """Test HNAP endpoint is correct."""
-        assert ArrisS33HnapParser.auth_config.hnap_endpoint == "/HNAP1/"
+        assert ArrisS33HnapParser.hnap_hints["endpoint"] == "/HNAP1/"
 
-    def test_auth_config_namespace(self):
+    def test_hnap_hints_namespace(self):
         """Test HNAP namespace matches standard."""
-        assert ArrisS33HnapParser.auth_config.soap_action_namespace == "http://purenetworks.com/HNAP1/"
+        assert ArrisS33HnapParser.hnap_hints["namespace"] == "http://purenetworks.com/HNAP1/"
 
-    def test_auth_config_login_url(self):
-        """Test login URL is correct."""
-        assert ArrisS33HnapParser.auth_config.login_url == "/Login.html"
+    def test_hnap_hints_empty_action_value(self):
+        """Test S33 uses empty string for action values."""
+        assert ArrisS33HnapParser.hnap_hints["empty_action_value"] == ""
 
 
 class TestS33UrlPatterns:

@@ -115,7 +115,7 @@ class TestErrorSensors:
         """Test sensors with zero errors."""
         mock_coordinator.data = {
             "cable_modem_total_corrected": 0,
-            "total_uncorrected": 0,
+            "cable_modem_total_uncorrected": 0,
         }
 
         corrected_sensor = ModemTotalCorrectedSensor(mock_coordinator, mock_entry)
@@ -123,6 +123,20 @@ class TestErrorSensors:
 
         assert corrected_sensor.native_value == 0
         assert uncorrected_sensor.native_value == 0
+
+    def test_unavailable_errors(self, mock_coordinator, mock_entry):
+        """Test sensors return None when data unavailable (no channels)."""
+        mock_coordinator.data = {
+            "cable_modem_total_corrected": None,
+            "cable_modem_total_uncorrected": None,
+        }
+
+        corrected_sensor = ModemTotalCorrectedSensor(mock_coordinator, mock_entry)
+        uncorrected_sensor = ModemTotalUncorrectedSensor(mock_coordinator, mock_entry)
+
+        # None indicates unavailable, not 0 errors
+        assert corrected_sensor.native_value is None
+        assert uncorrected_sensor.native_value is None
 
 
 class TestChannelCountSensors:

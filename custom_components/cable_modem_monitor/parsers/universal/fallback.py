@@ -13,7 +13,6 @@ import logging
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import AuthFactory, AuthStrategyType, BasicAuthConfig
 from custom_components.cable_modem_monitor.lib.html_crawler import generate_seed_urls
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -49,11 +48,9 @@ class UniversalFallbackParser(ModemParser):
     # Capabilities - Fallback parser has no data capabilities (diagnostic mode only)
     capabilities: set[ModemCapability] = set()
 
-    # Use HTTP Basic Auth - most common authentication for cable modems
-    # Will be skipped if no credentials provided
-    auth_config = BasicAuthConfig(
-        strategy=AuthStrategyType.BASIC_HTTP,
-    )
+    # Auth hint: Fallback parser suggests basic auth (most common for cable modems)
+    # AuthDiscovery will determine actual auth strategy from modem response
+    auth_hint = "basic"
 
     # Priority seed URLs - generic patterns, not manufacturer-specific
     # Link crawler will discover all other pages automatically
@@ -83,64 +80,6 @@ class UniversalFallbackParser(ModemParser):
             "Please use the 'Capture HTML' button to help add support for your modem."
         )
         return True
-
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """Attempt login using HTTP Basic Auth (most common for cable modems).
-
-        If no credentials provided, skip authentication (many status pages are public).
-        If credentials provided, attempt HTTP Basic Auth which is the most common
-        authentication method for cable modems.
-
-        Args:
-            session: Requests session
-            base_url: Modem base URL
-            username: Username (optional)
-            password: Password (optional)
-
-        Returns:
-            tuple: (success: bool, authenticated_html: str | None)
-        """
-        # If no credentials, skip authentication (many modems have public status pages)
-        if not username or not password:
-            _LOGGER.info(
-                "Fallback parser: No credentials provided. Will try to access public pages. "
-                "If your modem requires authentication, please configure username/password."
-            )
-            return True, None
-
-        # Try HTTP Basic Auth (most common for cable modems)
-        _LOGGER.info(
-            "Fallback parser: Attempting HTTP Basic Auth. "
-            "If this fails, your modem may use a different authentication method. "
-            "Please capture HTML and report the modem model in GitHub."
-        )
-
-        try:
-            auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
-            success, html = auth_strategy.login(session, base_url, username, password, self.auth_config)
-
-            if success:
-                _LOGGER.info("Fallback parser: HTTP Basic Auth succeeded")
-                return True, html
-            else:
-                _LOGGER.warning(
-                    "Fallback parser: HTTP Basic Auth failed. "
-                    "Your modem may require a different authentication method. "
-                    "You can still try to install without auth - some pages may work. "
-                    "Press 'Capture HTML' after installation to help us add proper support."
-                )
-                # Return True anyway to allow installation - user can capture HTML
-                return True, None
-
-        except Exception as e:
-            _LOGGER.warning(
-                "Fallback parser: Authentication attempt failed: %s. "
-                "Will proceed without auth - some pages may work. "
-                "Press 'Capture HTML' after installation to help us add proper support.",
-                e,
-            )
-            # Return True anyway to allow installation
-            return True, None
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Return minimal placeholder data for unknown modems.

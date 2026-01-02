@@ -289,22 +289,23 @@ class ModemParser(ABC):
 
     def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
         """
-        Log in to the modem.
+        Log in to the modem (legacy fallback).
 
-        NOTE (v3.12.0+): This method is DEPRECATED. Authentication is now handled
-        by the AuthDiscovery system during setup. Parsers should NOT implement
-        this method unless they have special requirements (e.g., HNAP parsers
-        that need to manage authentication state for data fetching).
+        NOTE (v3.12.0+): Authentication is primarily handled by AuthHandler using
+        stored auth strategies or parser hints (hnap_hints, js_auth_hints,
+        auth_form_hints). This method serves as a final fallback for parsers
+        without hints or stored strategies.
 
-        The default implementation returns (True, None) indicating no auth needed.
-        AuthDiscovery will detect the actual auth requirements during setup.
+        Parsers should define auth hints instead of overriding this method.
+        The default implementation returns (True, None) to allow unauthenticated
+        access for modems that don't require login.
 
         Returns:
             tuple[bool, str | None]: (success, authenticated_html)
                 - success: True if login succeeded or no login required
-                - authenticated_html: HTML content from login response, or None if not applicable
+                - authenticated_html: HTML content from login response, or None
         """
-        # Default: no auth required (AuthDiscovery handles actual auth during setup)
+        # Default: no auth required (parsers define hints for auth requirements)
         return (True, None)
 
     @abstractmethod

@@ -20,6 +20,8 @@ from homeassistant.helpers import (
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_AUTH_FORM_CONFIG,
+    CONF_AUTH_STRATEGY,
     CONF_DOCSIS_VERSION,
     CONF_HOST,
     CONF_LEGACY_SSL,
@@ -757,6 +759,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Create scraper
     legacy_ssl = entry.data.get(CONF_LEGACY_SSL, False)
+    auth_strategy = entry.data.get(CONF_AUTH_STRATEGY)
+    auth_form_config = entry.data.get(CONF_AUTH_FORM_CONFIG)
     scraper = ModemScraper(
         host,
         username,
@@ -766,6 +770,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         parser_name=parser_name_hint,
         verify_ssl=VERIFY_SSL,
         legacy_ssl=legacy_ssl,
+        auth_strategy=auth_strategy,
+        auth_form_config=auth_form_config,
     )
 
     # Create health monitor

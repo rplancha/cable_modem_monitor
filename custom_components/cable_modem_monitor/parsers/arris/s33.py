@@ -18,12 +18,7 @@ import logging
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import (
-    AuthFactory,
-    AuthStrategyType,
-    HNAPAuthConfig,
-    HNAPJsonRequestBuilder,
-)
+from custom_components.cable_modem_monitor.core.auth import HNAPJsonRequestBuilder
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
 
@@ -56,14 +51,13 @@ class ArrisS33HnapParser(ModemParser):
         # Store the JSON builder instance to preserve private_key across login/parse calls
         self._json_builder: HNAPJsonRequestBuilder | None = None
 
-    # HNAP authentication configuration
-    auth_config = HNAPAuthConfig(
-        strategy=AuthStrategyType.HNAP_SESSION,
-        login_url="/Login.html",
-        hnap_endpoint="/HNAP1/",
-        session_timeout_indicator="UN-AUTH",
-        soap_action_namespace="http://purenetworks.com/HNAP1/",
-    )
+    # HNAP configuration hints for AuthDiscovery (v3.12.0+)
+    # S33 requires empty string "" for action values (observed in HAR captures)
+    hnap_hints = {
+        "endpoint": "/HNAP1/",
+        "namespace": "http://purenetworks.com/HNAP1/",
+        "empty_action_value": "",  # S33-specific: uses "" not {} like MB8611
+    }
 
     url_patterns = [
         {"path": "/HNAP1/", "auth_method": "hnap", "auth_required": True},
@@ -92,47 +86,6 @@ class ArrisS33HnapParser(ModemParser):
             return True
         # Check for SURFboard branding (S33 is a SURFboard model)
         return "SURFboard" in html and "HNAP" in html
-
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """
-        Log in using HNAP authentication (tries JSON first, then XML/SOAP).
-
-        The S33 uses the same HNAP authentication as the MB8611.
-
-        Note: S33 typically uses HTTPS with self-signed certificates.
-        The session should have verify=False for self-signed certs.
-        """
-        # Try JSON-based HNAP login
-        # S33 requires empty string "" for action values (observed in HAR captures)
-        self._json_builder = HNAPJsonRequestBuilder(
-            endpoint=self.auth_config.hnap_endpoint,
-            namespace=self.auth_config.soap_action_namespace,
-            empty_action_value="",
-        )
-
-        _LOGGER.debug("S33: Attempting JSON-based HNAP login to %s", base_url)
-        success: bool
-        response: str | None
-        success, response = self._json_builder.login(session, base_url, username, password)
-
-        if success:
-            _LOGGER.info("S33: JSON HNAP login successful")
-            return (True, response)
-
-        # JSON login failed - clear the builder
-        self._json_builder = None
-
-        # Fall back to XML/SOAP-based HNAP login
-        _LOGGER.debug("S33: JSON login failed, trying XML/SOAP-based HNAP login")
-        auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
-        success, response = auth_strategy.login(session, base_url, username, password, self.auth_config)
-
-        if success:
-            _LOGGER.info("S33: XML/SOAP HNAP login successful")
-        else:
-            _LOGGER.warning("S33: Both JSON and XML/SOAP HNAP login methods failed")
-
-        return (success, response)
 
     def _is_auth_failure(self, error: Exception) -> bool:
         """Detect if an exception indicates an authentication failure."""
@@ -212,9 +165,9 @@ class ArrisS33HnapParser(ModemParser):
             _LOGGER.debug("S33: Reusing JSON builder from login (private_key preserved)")
         else:
             builder = HNAPJsonRequestBuilder(
-                endpoint=self.auth_config.hnap_endpoint,
-                namespace=self.auth_config.soap_action_namespace,
-                empty_action_value="",
+                endpoint=self.hnap_hints["endpoint"],
+                namespace=self.hnap_hints["namespace"],
+                empty_action_value=self.hnap_hints.get("empty_action_value", ""),
             )
             _LOGGER.warning("S33: No stored JSON builder - creating new one (may lack auth)")
 
@@ -541,9 +494,9 @@ class ArrisS33HnapParser(ModemParser):
             _LOGGER.debug("S33: Using stored JSON builder for restart")
         else:
             builder = HNAPJsonRequestBuilder(
-                endpoint=self.auth_config.hnap_endpoint,
-                namespace=self.auth_config.soap_action_namespace,
-                empty_action_value="",
+                endpoint=self.hnap_hints["endpoint"],
+                namespace=self.hnap_hints["namespace"],
+                empty_action_value=self.hnap_hints.get("empty_action_value", ""),
             )
             _LOGGER.warning("S33: No stored JSON builder for restart - creating new one (may lack auth)")
 

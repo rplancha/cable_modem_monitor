@@ -128,7 +128,7 @@ class AuthDiscovery:
         data_url: str,
         username: str | None,
         password: str | None,
-        parser: ModemParser,
+        parser: ModemParser | None = None,
     ) -> DiscoveryResult:
         """Discover auth requirements by inspecting the response.
 
@@ -138,7 +138,8 @@ class AuthDiscovery:
             data_url: URL to fetch data from
             username: Credentials (may be None)
             password: Credentials (may be None)
-            parser: Parser instance (for validation and hints)
+            parser: Parser instance (for validation and hints). May be None for
+                discovery-only mode during initial setup (before parser detection).
 
         Returns:
             DiscoveryResult with strategy and any discovered config
@@ -146,7 +147,7 @@ class AuthDiscovery:
         _LOGGER.debug(
             "Starting auth discovery for %s (parser: %s)",
             data_url,
-            parser.name,
+            parser.name if parser else "None (discovery-only mode)",
         )
 
         # Step 1: Fetch anonymously (don't follow redirects)
@@ -176,7 +177,7 @@ class AuthDiscovery:
         data_url: str,
         username: str | None,
         password: str | None,
-        parser: ModemParser,
+        parser: ModemParser | None,
         redirect_count: int,
     ) -> DiscoveryResult:
         """Route to appropriate handler based on response."""
@@ -277,7 +278,7 @@ class AuthDiscovery:
         data_url: str,
         username: str | None,
         password: str | None,
-        parser: ModemParser,
+        parser: ModemParser | None,
     ) -> DiscoveryResult:
         """Handle 401 Basic Auth challenge."""
         if not username or not password:
@@ -313,7 +314,7 @@ class AuthDiscovery:
         data_url: str,
         username: str | None,
         password: str | None,
-        parser: ModemParser,
+        parser: ModemParser | None,
     ) -> DiscoveryResult:
         """Handle form-based authentication."""
         if not username or not password:
@@ -379,7 +380,7 @@ class AuthDiscovery:
         data_url: str,
         username: str | None,
         password: str | None,
-        parser: ModemParser,
+        parser: ModemParser | None,
     ) -> DiscoveryResult:
         """Handle HNAP/SOAP session authentication.
 
@@ -409,15 +410,15 @@ class AuthDiscovery:
         data_url: str,
         username: str | None,
         password: str | None,
-        parser: ModemParser,
+        parser: ModemParser | None,
     ) -> DiscoveryResult:
         """Handle JavaScript-based authentication.
 
         Some modems (like SB8200) have forms that use JavaScript for submission
         instead of standard form submission. We check for parser hints.
         """
-        # Check for parser hints
-        js_auth_hints = getattr(parser, "js_auth_hints", None)
+        # Check for parser hints (parser may be None in discovery-only mode)
+        js_auth_hints = getattr(parser, "js_auth_hints", None) if parser else None
         if js_auth_hints:
             pattern = js_auth_hints.get("pattern")
             if pattern == "url_token_session":
@@ -446,7 +447,7 @@ class AuthDiscovery:
         data_url: str,
         username: str | None,
         password: str | None,
-        parser: ModemParser,
+        parser: ModemParser | None,
         redirect_count: int,
     ) -> DiscoveryResult:
         """Follow redirect and inspect the destination."""
@@ -472,15 +473,15 @@ class AuthDiscovery:
             redirect_count=redirect_count,
         )
 
-    def _parse_login_form(self, html: str, parser: ModemParser) -> DiscoveredFormConfig | None:
+    def _parse_login_form(self, html: str, parser: ModemParser | None) -> DiscoveredFormConfig | None:
         """Extract form configuration from login page HTML."""
         soup = BeautifulSoup(html, "html.parser")
         form = soup.find("form")
         if not form:
             return None
 
-        # Get parser overrides if any
-        hints = getattr(parser, "auth_form_hints", {})
+        # Get parser overrides if any (parser may be None in discovery-only mode)
+        hints = getattr(parser, "auth_form_hints", {}) if parser else {}
 
         # Find username field
         username_field = hints.get("username_field") or self._find_username_field(form)
@@ -613,10 +614,18 @@ class AuthDiscovery:
 
         return ""
 
-    def _can_parse_data(self, html: str, parser: ModemParser) -> bool:
-        """Check if HTML contains parseable modem data."""
+    def _can_parse_data(self, html: str, parser: ModemParser | None) -> bool:
+        """Check if HTML contains parseable modem data.
+
+        When parser is None (discovery-only mode), returns True to allow
+        auth discovery to proceed without parser validation.
+        """
         if not html:
             return False
+        if parser is None:
+            # No parser available - assume data is parseable (discovery-only mode)
+            # This allows auth discovery to run before parser detection
+            return True
         try:
             soup = BeautifulSoup(html, "html.parser")
             result = parser.parse(soup)
