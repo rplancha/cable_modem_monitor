@@ -1,15 +1,24 @@
 """Authentication module for cable modem monitor.
 
-This module provides pluggable authentication strategies for various modem types.
+This module provides pluggable authentication strategies for various modem types,
+as well as response-driven auth discovery for automatic strategy detection.
 
 Usage:
     from custom_components.cable_modem_monitor.core.auth import (
         AuthFactory,
         AuthStrategyType,
         BasicAuthConfig,
+        AuthDiscovery,
+        DiscoveryResult,
     )
 
-    # Get a strategy
+    # Discover auth strategy (v3.12.0+)
+    discovery = AuthDiscovery()
+    result = discovery.discover(session, base_url, data_url, user, password, parser)
+    if result.success:
+        print(f"Detected: {result.strategy}")
+
+    # Get a strategy by type
     strategy = AuthFactory.get_strategy(AuthStrategyType.BASIC_HTTP)
 
     # Use a config
@@ -31,6 +40,9 @@ from .configs import (
     RedirectFormAuthConfig,
     UrlTokenSessionConfig,
 )
+
+# Discovery (v3.12.0+)
+from .discovery import AuthDiscovery, DiscoveredFormConfig, DiscoveryResult
 
 # Factory
 from .factory import AuthFactory
@@ -67,6 +79,10 @@ __all__ = [
     # Base
     "AuthResult",
     "AuthStrategy",
+    # Discovery
+    "AuthDiscovery",
+    "DiscoveredFormConfig",
+    "DiscoveryResult",
     # Factory
     "AuthFactory",
     # Strategies

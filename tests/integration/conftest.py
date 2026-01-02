@@ -424,3 +424,275 @@ def sb8200_server_auth_https(test_certs) -> Generator[MockServer, None, None]:
     server.start()
     yield server
     server.stop()
+
+
+# =============================================================================
+# Auth Discovery Mock Servers
+# =============================================================================
+
+
+class BasicAuthMockHandler(BaseHTTPRequestHandler):
+    """Mock server requiring HTTP Basic Auth."""
+
+    valid_credentials = ("admin", "password")
+
+    def log_message(self, format, *args):
+        """Suppress logging during tests."""
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802
+        """Handle GET with Basic Auth check."""
+        import base64
+
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header.startswith("Basic "):
+            try:
+                token = auth_header.split(" ", 1)[1]
+                decoded = base64.b64decode(token).decode("utf-8")
+                username, password = decoded.split(":", 1)
+                if (username, password) == self.valid_credentials:
+                    self._serve_data_page()
+                    return
+            except Exception:
+                pass
+
+        # Return 401 Unauthorized with WWW-Authenticate header
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="Modem"')
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Unauthorized")
+
+    def _serve_data_page(self) -> None:
+        """Serve modem data page."""
+        content = MOCK_MODEM_RESPONSE
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+
+class FormAuthMockHandler(BaseHTTPRequestHandler):
+    """Mock server with form-based authentication."""
+
+    valid_username = "admin"
+    valid_password = "password"
+    authenticated_sessions: set = set()
+
+    def log_message(self, format, *args):
+        """Suppress logging during tests."""
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802
+        """Handle GET requests."""
+        # Check session cookie
+        cookies = self.headers.get("Cookie", "")
+        if "session=authenticated" in cookies or self._check_session(cookies):
+            self._serve_data_page()
+        else:
+            self._serve_login_form()
+
+    def do_POST(self) -> None:  # noqa: N802
+        """Handle POST (form submission)."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        post_data = self.rfile.read(content_length).decode("utf-8")
+
+        # Parse form data
+        from urllib.parse import parse_qs
+
+        params = parse_qs(post_data)
+        username = params.get("username", [""])[0]
+        password = params.get("password", [""])[0]
+
+        if username == self.valid_username and password == self.valid_password:
+            # Set session cookie and redirect to data page
+            import uuid
+
+            session_id = str(uuid.uuid4())
+            self.authenticated_sessions.add(session_id)
+            self.send_response(302)
+            self.send_header("Location", "/status.html")
+            self.send_header("Set-Cookie", f"session={session_id}; Path=/")
+            self.end_headers()
+        else:
+            # Return login form again (wrong creds)
+            self._serve_login_form()
+
+    def _check_session(self, cookies: str) -> bool:
+        """Check if session cookie is valid."""
+        for cookie in cookies.split(";"):
+            if "session=" in cookie:
+                session_id = cookie.split("=", 1)[1].strip()
+                return session_id in self.authenticated_sessions
+        return False
+
+    def _serve_login_form(self) -> None:
+        """Serve login form."""
+        content = b"""<!DOCTYPE html>
+<html><head><title>Login</title></head>
+<body>
+<form action="/login" method="POST">
+    <input type="text" name="username" placeholder="Username">
+    <input type="password" name="password" placeholder="Password">
+    <input type="hidden" name="csrf_token" value="test-csrf-token">
+    <input type="submit" value="Login">
+</form>
+</body></html>"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _serve_data_page(self) -> None:
+        """Serve modem data page."""
+        content = MOCK_MODEM_RESPONSE
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+
+class HNAPAuthMockHandler(BaseHTTPRequestHandler):
+    """Mock server with HNAP/SOAP authentication (like S33/MB8611)."""
+
+    def log_message(self, format, *args):
+        """Suppress logging during tests."""
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802
+        """Serve HNAP login page with SOAPAction.js script."""
+        if self.path == "/" or "Login" in self.path:
+            self._serve_hnap_login_page()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _serve_hnap_login_page(self) -> None:
+        """Serve login page with HNAP detection scripts."""
+        content = b"""<!DOCTYPE html>
+<html><head>
+<title>Login</title>
+<script type="text/javascript" src="js/SOAP/SOAPAction.js"></script>
+<script type="text/javascript" src="js/Login.js"></script>
+</head>
+<body>
+<form id="loginForm">
+    <input type="text" id="username" name="username">
+    <input type="password" id="password" name="password">
+    <button type="button" onclick="doLogin()">Login</button>
+</form>
+</body></html>"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+
+class RedirectAuthMockHandler(BaseHTTPRequestHandler):
+    """Mock server that uses meta refresh redirect to login page."""
+
+    authenticated = False
+
+    def log_message(self, format, *args):
+        """Suppress logging during tests."""
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802
+        """Handle GET with redirect to login."""
+        if self.path == "/login":
+            self._serve_login_form()
+        elif self.path == "/status":
+            cookies = self.headers.get("Cookie", "")
+            if "session=authenticated" in cookies:
+                self._serve_data_page()
+            else:
+                self._serve_meta_refresh_redirect()
+        else:
+            self._serve_meta_refresh_redirect()
+
+    def do_POST(self) -> None:  # noqa: N802
+        """Handle form submission."""
+        self.send_response(302)
+        self.send_header("Location", "/status")
+        self.send_header("Set-Cookie", "session=authenticated; Path=/")
+        self.end_headers()
+
+    def _serve_meta_refresh_redirect(self) -> None:
+        """Serve page with meta refresh redirect."""
+        content = b'<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>'
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _serve_login_form(self) -> None:
+        """Serve login form."""
+        content = b"""<!DOCTYPE html>
+<html><head><title>Login</title></head>
+<body>
+<form action="/login" method="POST">
+    <input type="text" name="user" placeholder="Username">
+    <input type="password" name="pass" placeholder="Password">
+    <input type="submit" value="Login">
+</form>
+</body></html>"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _serve_data_page(self) -> None:
+        """Serve modem data page."""
+        content = MOCK_MODEM_RESPONSE
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+
+@pytest.fixture
+def basic_auth_server() -> Generator[MockServer, None, None]:
+    """Provide mock server requiring HTTP Basic Auth."""
+    port = _find_free_port()
+    server = MockServer(port=port, ssl_context=None, handler_class=BasicAuthMockHandler)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture
+def form_auth_server() -> Generator[MockServer, None, None]:
+    """Provide mock server with form-based authentication."""
+    FormAuthMockHandler.authenticated_sessions = set()
+    port = _find_free_port()
+    server = MockServer(port=port, ssl_context=None, handler_class=FormAuthMockHandler)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture
+def hnap_auth_server() -> Generator[MockServer, None, None]:
+    """Provide mock server with HNAP-style login page."""
+    port = _find_free_port()
+    server = MockServer(port=port, ssl_context=None, handler_class=HNAPAuthMockHandler)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture
+def redirect_auth_server() -> Generator[MockServer, None, None]:
+    """Provide mock server with meta refresh redirect to login."""
+    port = _find_free_port()
+    server = MockServer(port=port, ssl_context=None, handler_class=RedirectAuthMockHandler)
+    server.start()
+    yield server
+    server.stop()

@@ -31,3 +31,6 @@ class AuthStrategyType(Enum):
 
     URL_TOKEN_SESSION = "url_token_session"
     """URL-based token auth with session cookie (e.g., ARRIS SB8200 HTTPS variant)."""
+
+    UNKNOWN = "unknown"
+    """Unrecognized auth pattern - captured for debugging and future implementation."""

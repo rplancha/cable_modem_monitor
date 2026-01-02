@@ -37,6 +37,14 @@ CONF_ACTUAL_MODEL = "actual_model"  # Actual model name extracted from modem (e.
 CONF_LEGACY_SSL = "legacy_ssl"  # Auto-detected: True if modem requires SECLEVEL=0 ciphers
 CONF_DETECTION_METHOD = "detection_method"  # How parser was selected: "auto_detected" or "user_selected"
 
+# Auth discovery fields (v3.12.0+)
+CONF_AUTH_STRATEGY = "auth_strategy"  # Discovered auth strategy type
+CONF_AUTH_FORM_CONFIG = "auth_form_config"  # Discovered form config (for form-based auth)
+CONF_AUTH_DISCOVERY_STATUS = "auth_discovery_status"  # "success", "unknown_pattern", etc.
+CONF_AUTH_DISCOVERY_FAILED = "auth_discovery_failed"  # True if discovery failed but modem works
+CONF_AUTH_DISCOVERY_ERROR = "auth_discovery_error"  # Error message if discovery failed
+CONF_AUTH_CAPTURED_RESPONSE = "auth_captured_response"  # Captured response for unknown patterns
+
 # Polling interval defaults based on industry best practices
 # References:
 # - SNMP Polling: https://obkio.com/blog/snmp-polling/
