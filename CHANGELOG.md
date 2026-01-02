@@ -26,6 +26,19 @@ v3.12.0 introduces Auth Strategy Discovery, a major architectural improvement th
 - **SB8200 Auth**: URL token authentication now uses session cookies instead of parser-stored tokens
 - **S33/MB8611 HNAP**: HNAP builder is now created by AuthHandler and transferred to parser for data fetches
 
+### Fixed
+
+- **Form Auth Response Handling** - Auth handler now returns `None` instead of form response HTML, allowing scraper to fetch actual data pages
+- **Invalid Auth Error Display** - Bad credentials now show "Invalid username or password" instead of misleading "Cannot connect" error
+- **Options Flow Auth Handling** - Options/reconfigure flow now properly catches authentication errors
+- **Polling Log Noise** - Detection and connection success logs demoted from INFO to DEBUG (only visible when debugging enabled)
+- **Misleading Parser Names** - Removed parser name from connection log that incorrectly showed URL pattern source instead of detected modem
+
+### Improved
+
+- **Error Messages** - Simplified authentication error message across all 12 languages
+- **Conditional Logging** - Config flow uses verbose logging (INFO) for setup visibility, polling uses quiet logging (DEBUG) for normal operation
+
 ### Technical Details
 
 Auth strategies supported:

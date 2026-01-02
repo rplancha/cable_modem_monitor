@@ -94,8 +94,13 @@ handler = AuthHandler(
     form_config=stored_form_config,
 )
 
-success, html = handler.authenticate(session, base_url, username, password)
+# verbose=True for discovery (INFO logs), False for polling (DEBUG logs)
+success, html = handler.authenticate(session, base_url, username, password, verbose=True)
 ```
+
+**Return values:**
+- `success`: True if authentication succeeded
+- `html`: Page content if available, or `None` for form auth (scraper fetches data pages separately)
 
 ### AuthFactory (`factory.py`)
 
@@ -162,6 +167,8 @@ class MyParser(ModemParser):
     auth_form_hints = {
         "username_field": "webUserName",
         "password_field": "webPassKey",
+        "login_url": "/goform/login",  # Optional: custom login endpoint
+        "password_encoding": "base64",  # Optional: encode password before POST
     }
 ```
 
@@ -204,20 +211,29 @@ For non-standard auth patterns, parsers can provide hints:
 
 ```python
 class MyModemParser(ModemParser):
-    # For non-standard form fields
+    # For non-standard form fields (MB7621, etc.)
     auth_form_hints = {
         "username_field": "customUserField",
         "password_field": "customPassField",
+        "login_url": "/goform/login",
+        "password_encoding": "base64",  # Optional: "base64" for Base64-encoded passwords
     }
 
-    # For JavaScript-based auth (like SB8200)
+    # For HNAP/SOAP protocol (S33, MB8611)
+    hnap_hints = {
+        "endpoint": "/HNAP1/",
+        "namespace": "http://purenetworks.com/HNAP1/",
+        "empty_action_value": "",  # S33 uses "", MB8611 uses {}
+    }
+
+    # For JavaScript-based auth (SB8200)
     js_auth_hints = {
         "pattern": "url_token_session",
         "login_prefix": "login_",
     }
 ```
 
-Most parsers need neither - auth is auto-detected.
+Most parsers need none of these - auth is auto-detected.
 
 ## Diagnostics
 
