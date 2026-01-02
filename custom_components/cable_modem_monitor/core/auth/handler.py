@@ -218,14 +218,23 @@ class AuthHandler:
         hidden_fields = self.form_config.get("hidden_fields", {})
 
         # Encode password if using FORM_BASE64 strategy
+        # MB7621 (and similar modems) do: escape(password) then base64 encode
+        # JavaScript escape() URL-encodes special characters before base64
         encoded_password = password
         password_was_encoded = False
         if self.strategy == AuthStrategyType.FORM_BASE64 and password:
             import base64
+            from urllib.parse import quote
 
-            encoded_password = base64.b64encode(password.encode("utf-8")).decode("utf-8")
+            # First URL-encode (like JavaScript escape()), then base64 encode
+            # JavaScript escape() doesn't encode: @*_+-./
+            url_encoded = quote(password, safe="@*_+-./")
+            encoded_password = base64.b64encode(url_encoded.encode("utf-8")).decode("utf-8")
             password_was_encoded = True
-            _LOGGER.info("Password encoded with base64 for FORM_BASE64 strategy")
+            _LOGGER.info(
+                "Password encoded: URL-escape then base64 (FORM_BASE64 strategy, url_encoded_len=%d)",
+                len(url_encoded),
+            )
 
         # Build form data
         form_data = {
