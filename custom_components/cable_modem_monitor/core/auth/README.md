@@ -13,41 +13,31 @@ Parsers no longer handle authentication - they just parse data.
 
 ### Discovery Flow (Setup & Reconfigure)
 
-```
-                    GET / (base URL, anonymous)
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │ Inspect Response │
-                    └────────┬────────┘
-                             │
-    ┌────────────────────────┼────────────────────────┐
-    │            ┌───────────┼───────────┐            │
-    ▼            ▼           ▼           ▼            ▼
-200 + data   401 + header  200 + form  200 + HNAP  302/meta
-    │            │           │           │            │
-    ▼            ▼           ▼           ▼            ▼
-NO_AUTH     BASIC_HTTP   FORM_PLAIN  HNAP_SESSION  Follow →
-    │            │           │           │         re-inspect
-    └────────────┴───────────┴───────────┴────────────┘
-                             │
-                             ▼
-                  Store in Config Entry
+```mermaid
+flowchart TD
+    A["GET / (anonymous)"] --> B{Inspect Response}
+
+    B -->|"200 + data"| C[NO_AUTH]
+    B -->|"401 + WWW-Authenticate"| D[BASIC_HTTP]
+    B -->|"200 + login form"| E[FORM_PLAIN]
+    B -->|"200 + HNAP script"| F[HNAP_SESSION]
+    B -->|"302 / meta refresh"| G["Follow redirect"]
+
+    G --> B
+
+    C --> H["Store in Config Entry"]
+    D --> H
+    E --> H
+    F --> H
 ```
 
 ### Polling Flow (Each Update)
 
-```
-Read auth_strategy from config entry
-              │
-              ▼
-AuthHandler executes stored strategy (no re-discovery)
-              │
-              ▼
-Fetch data pages with authenticated session
-              │
-              ▼
-Parse with cached parser
+```mermaid
+flowchart TD
+    A[Read auth_strategy from config entry] --> B[AuthHandler executes stored strategy]
+    B --> C[Fetch data pages with authenticated session]
+    C --> D[Parse with cached parser]
 ```
 
 ## Supported Auth Strategies
@@ -117,32 +107,20 @@ result = strategy.authenticate(session, base_url, username, password, config)
 
 HNAP (Home Network Administration Protocol) is used by Arris S33, Motorola MB8611, and similar modems.
 
-```
-Client                              Server
-   │                                   │
-   │  POST /HNAP1/                     │
-   │  {Action: "request", Username}    │
-   │──────────────────────────────────►│
-   │                                   │
-   │  {Challenge, Cookie, PublicKey}   │
-   │◄──────────────────────────────────│
-   │                                   │
-   │  Compute:                         │
-   │  PrivateKey = HMAC-MD5(           │
-   │    PublicKey + Password,          │
-   │    Challenge)                     │
-   │  LoginPassword = HMAC-MD5(        │
-   │    PrivateKey, Challenge)         │
-   │                                   │
-   │  POST /HNAP1/                     │
-   │  Cookie: uid=<Cookie>             │
-   │  {Action: "login", LoginPassword} │
-   │──────────────────────────────────►│
-   │                                   │
-   │  {LoginResult: "OK"}              │
-   │◄──────────────────────────────────│
-   │                                   │
-   │  Subsequent requests use Cookie   │
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: POST /HNAP1/<br/>{Action: "request", Username}
+    S-->>C: {Challenge, Cookie, PublicKey}
+
+    Note over C: Compute:<br/>PrivateKey = HMAC-MD5(PublicKey + Password, Challenge)<br/>LoginPassword = HMAC-MD5(PrivateKey, Challenge)
+
+    C->>S: POST /HNAP1/<br/>Cookie: uid=Cookie<br/>{Action: "login", LoginPassword}
+    S-->>C: {LoginResult: "OK"}
+
+    Note over C,S: Subsequent requests use Cookie
 ```
 
 **Detection:** Page includes `<script src="**/SOAPAction.js">` or similar.
@@ -151,13 +129,14 @@ Client                              Server
 
 Standard HTML form login with automatic field detection.
 
-```
-1. GET login page → Parse <form> element
-2. Find username field (type="text", name contains "user")
-3. Find password field (type="password")
-4. Collect hidden fields (CSRF tokens)
-5. POST form data
-6. Session cookie set for subsequent requests
+```mermaid
+flowchart LR
+    A[GET login page] --> B[Parse form element]
+    B --> C[Find username field]
+    C --> D[Find password field]
+    D --> E[Collect hidden fields]
+    E --> F[POST form data]
+    F --> G[Session cookie set]
 ```
 
 **Parser Hints:** For non-standard forms, parsers can provide:
@@ -176,12 +155,12 @@ class MyParser(ModemParser):
 
 JavaScript-based auth that encodes credentials in URL.
 
-```
-1. Detect: Form has type="button" instead of type="submit"
-2. Check parser for js_auth_hints
-3. Build URL: /page.html?login_<base64(user:pass)>
-4. Include Authorization: Basic header
-5. Session token returned for subsequent requests
+```mermaid
+flowchart LR
+    A["Detect: type=button"] --> B[Check js_auth_hints]
+    B --> C["Build URL with token"]
+    C --> D[Add Basic Auth header]
+    D --> E[Session token returned]
 ```
 
 **Parser Hints:**
