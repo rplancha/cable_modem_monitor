@@ -72,8 +72,8 @@ class TestValidateInput:
     @patch("custom_components.cable_modem_monitor.config_flow.ModemScraper")
     async def test_success(self, mock_scraper_class, mock_connectivity_check, mock_hass, valid_input):
         """Test successful validation."""
-        # Mock connectivity check to succeed
-        mock_connectivity_check.return_value = (True, None, False)
+        # Mock connectivity check to succeed (is_reachable, error, legacy_ssl, working_url)
+        mock_connectivity_check.return_value = (True, None, False, "https://192.168.100.1")
 
         # Mock scraper to return valid data
         mock_scraper = Mock()
@@ -272,7 +272,7 @@ class TestModemNameFormatting:
         self, mock_scraper_class, mock_connectivity_check, mock_hass, valid_input
     ):
         """Test that manufacturer name is not duplicated when modem name includes it."""
-        mock_connectivity_check.return_value = (True, None, False)
+        mock_connectivity_check.return_value = (True, None, False, "https://192.168.100.1")
 
         mock_scraper = Mock()
         mock_scraper.get_modem_data.return_value = {
@@ -304,7 +304,7 @@ class TestModemNameFormatting:
         self, mock_scraper_class, mock_connectivity_check, mock_hass, valid_input
     ):
         """Test that manufacturer is prepended when not in modem name."""
-        mock_connectivity_check.return_value = (True, None, False)
+        mock_connectivity_check.return_value = (True, None, False, "https://192.168.100.1")
 
         mock_scraper = Mock()
         mock_scraper.get_modem_data.return_value = {
@@ -336,7 +336,7 @@ class TestModemNameFormatting:
         self, mock_scraper_class, mock_connectivity_check, mock_hass, valid_input
     ):
         """Test title when manufacturer is Unknown."""
-        mock_connectivity_check.return_value = (True, None, False)
+        mock_connectivity_check.return_value = (True, None, False, "https://192.168.100.1")
 
         mock_scraper = Mock()
         mock_scraper.get_modem_data.return_value = {
@@ -367,7 +367,7 @@ class TestModemNameFormatting:
         self, mock_scraper_class, mock_connectivity_check, mock_hass, valid_input
     ):
         """Test that detection_info is included in result."""
-        mock_connectivity_check.return_value = (True, None, False)
+        mock_connectivity_check.return_value = (True, None, False, "https://192.168.100.1")
 
         mock_scraper = Mock()
         mock_scraper.get_modem_data.return_value = {

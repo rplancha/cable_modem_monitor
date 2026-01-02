@@ -42,7 +42,7 @@ class TestConnectivityCheckHTTP:
 
     def test_http_server_is_reachable(self, http_server):
         """Verify connectivity check works for HTTP servers."""
-        is_reachable, error, legacy_ssl = _do_quick_connectivity_check(http_server.url)
+        is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check(http_server.url)
         assert is_reachable is True
         assert error is None
         assert legacy_ssl is False  # HTTP doesn't need legacy SSL
@@ -54,7 +54,7 @@ class TestConnectivityCheckHTTPSModern:
 
     def test_https_modern_server_is_reachable(self, https_modern_server):
         """Verify connectivity check works for HTTPS with modern ciphers."""
-        is_reachable, error, legacy_ssl = _do_quick_connectivity_check(https_modern_server.url)
+        is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check(https_modern_server.url)
         assert is_reachable is True
         assert error is None
         assert legacy_ssl is False  # Modern SSL worked
@@ -77,7 +77,7 @@ class TestConnectivityCheckHTTPSLegacy:
         if not _legacy_server_rejects_modern_client(https_legacy_server.url):
             pytest.skip("System OpenSSL negotiates with legacy ciphers; " "cannot test legacy SSL fallback scenario")
 
-        is_reachable, error, legacy_ssl = _do_quick_connectivity_check(https_legacy_server.url)
+        is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check(https_legacy_server.url)
 
         assert is_reachable is True, (
             f"Connectivity check should succeed with legacy SSL fallback. " f"Error was: {error}"

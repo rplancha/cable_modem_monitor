@@ -160,7 +160,7 @@ async def _connect_to_modem(hass: HomeAssistant, scraper) -> dict[str, Any]:
     return modem_data
 
 
-def _try_legacy_ssl(url: str, timeout: float) -> tuple[bool, str | None, bool] | None:
+def _try_legacy_ssl(url: str, timeout: float) -> tuple[bool, str | None, bool, str] | None:
     """Try connecting to URL with legacy SSL ciphers.
 
     Args:
@@ -168,7 +168,7 @@ def _try_legacy_ssl(url: str, timeout: float) -> tuple[bool, str | None, bool] |
         timeout: Connection timeout in seconds
 
     Returns:
-        (True, None, True) if legacy SSL connection succeeds
+        (True, None, True, url) if legacy SSL connection succeeds
         None if legacy SSL also fails (caller should continue trying other options)
     """
     import requests
@@ -188,13 +188,13 @@ def _try_legacy_ssl(url: str, timeout: float) -> tuple[bool, str | None, bool] |
             url,
             response.status_code,
         )
-        return True, None, True  # Legacy SSL needed
+        return True, None, True, url  # Legacy SSL needed
     except Exception as e:
         _LOGGER.info("    Legacy SSL also failed for %s: %s", url, type(e).__name__)
         return None  # Legacy SSL didn't help
 
 
-def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  # noqa: C901
+def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool, str | None]:  # noqa: C901
     """Perform quick HTTP connectivity check to modem (sync version for executor).
 
     Tries HTTPS first, then HTTP. If HTTPS fails with SSL handshake error,
@@ -204,10 +204,10 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
         host: Modem IP address or hostname
 
     Returns:
-        tuple of (is_reachable, error_message, legacy_ssl_needed)
-        - (True, None, False) if modem responds with modern SSL or HTTP
-        - (True, None, True) if modem required legacy SSL ciphers
-        - (False, error_message, False) if unreachable
+        tuple of (is_reachable, error_message, legacy_ssl_needed, working_url)
+        - (True, None, False, url) if modem responds with modern SSL or HTTP
+        - (True, None, True, url) if modem required legacy SSL ciphers
+        - (False, error_message, False, None) if unreachable
     """
     import time
 
@@ -248,7 +248,7 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
             elapsed = time.time() - start_time
             # Any response (200, 401, 403, etc.) means modem is reachable
             _LOGGER.info("✓ Connected to modem at %s (HTTP %d, %.2fs)", test_url, response.status_code, elapsed)
-            return True, None, False  # No legacy SSL needed
+            return True, None, False, test_url  # No legacy SSL needed
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             # BUG FIX (v3.4.0): Some modems (e.g., Netgear C3700 with "PS HTTP Server") reject
             # HTTP HEAD requests with "Connection reset by peer" (ConnectionError).
@@ -279,7 +279,7 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
                     response.status_code,
                     elapsed,
                 )
-                return True, None, False  # No legacy SSL needed
+                return True, None, False, test_url  # No legacy SSL needed
             except requests.exceptions.Timeout:
                 elapsed = time.time() - start_time
                 msg = f"{protocol} GET also timed out after {elapsed:.2f}s"
@@ -332,7 +332,7 @@ def _do_quick_connectivity_check(host: str) -> tuple[bool, str | None, bool]:  #
         f"(4) If your modem is slow to respond, try submitting again.\n\n"
         f"Diagnostic details: {' | '.join(diagnostic_info)}"
     )
-    return False, error_msg, False
+    return False, error_msg, False, None
 
 
 def _detect_legacy_ssl_sync(host: str) -> bool:
@@ -533,17 +533,22 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     # Quick connectivity pre-check (run in executor to avoid blocking)
     # This also detects if legacy SSL is needed (for older modem firmware)
-    is_reachable, error_msg, legacy_ssl = await hass.async_add_executor_job(_do_quick_connectivity_check, host)
+    connectivity_result = await hass.async_add_executor_job(_do_quick_connectivity_check, host)
+    is_reachable, error_msg, legacy_ssl, working_url = connectivity_result
     if not is_reachable:
         _LOGGER.error("Connectivity check failed for %s: %s", host, error_msg)
         raise CannotConnectError(error_msg)
 
     # Step 2 (v3.12.0+): Run auth discovery BEFORE parser detection
     # This discovers the authentication strategy based on HTTP response analysis
+    # Use the working URL from connectivity check (not just host) to avoid re-guessing HTTP/HTTPS
     username = data.get(CONF_USERNAME)
     password = data.get(CONF_PASSWORD)
-    _LOGGER.info("Running auth discovery for %s...", host)
-    auth_result = await hass.async_add_executor_job(_run_auth_discovery_sync, host, username, password, legacy_ssl)
+    discovery_url = working_url or host
+    _LOGGER.info("Running auth discovery for %s...", discovery_url)
+    auth_result = await hass.async_add_executor_job(
+        _run_auth_discovery_sync, discovery_url, username, password, legacy_ssl
+    )
     _LOGGER.info(
         "Auth discovery result: strategy=%s, status=%s",
         auth_result.get("auth_strategy"),

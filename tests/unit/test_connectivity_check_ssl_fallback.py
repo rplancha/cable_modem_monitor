@@ -60,7 +60,7 @@ class TestConnectivityCheckSSLFallback:
             # Legacy SSL session succeeds
             mock_session_class.return_value = mock_legacy_session
 
-            is_reachable, error, legacy_ssl = _do_quick_connectivity_check("https://192.168.100.1")
+            is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("https://192.168.100.1")
 
             # Should succeed with legacy SSL
             assert is_reachable is True, (
@@ -82,7 +82,7 @@ class TestConnectivityCheckSSLFallback:
             mock_head.side_effect = connection_error
             mock_get.side_effect = connection_error
 
-            is_reachable, error, legacy_ssl = _do_quick_connectivity_check("https://192.168.100.1")
+            is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("https://192.168.100.1")
 
             # This should correctly return False - connection is actually refused
             assert is_reachable is False
@@ -101,7 +101,7 @@ class TestConnectivityCheckSSLFallback:
         with patch("requests.head") as mock_head:
             mock_head.return_value = mock_response
 
-            is_reachable, error, legacy_ssl = _do_quick_connectivity_check("https://192.168.100.1")
+            is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("https://192.168.100.1")
 
             assert is_reachable is True
             assert error is None
@@ -154,7 +154,7 @@ class TestConnectivityCheckHTTPRedirectToHTTPS:
             mock_session_class.return_value = mock_legacy_session
 
             # Test with bare host (will try https:// first, then http://)
-            is_reachable, error, legacy_ssl = _do_quick_connectivity_check("192.168.100.1")
+            is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("192.168.100.1")
 
             # Should succeed via legacy SSL on HTTPS URL
             assert is_reachable is True, f"Should succeed with legacy SSL fallback. Error: {error}"
@@ -190,7 +190,7 @@ class TestConnectivityCheckLogging:
             mock_head.return_value = mock_response
 
             with caplog.at_level(logging.DEBUG):
-                is_reachable, error, legacy_ssl = _do_quick_connectivity_check("192.168.100.1")
+                is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("192.168.100.1")
 
         assert is_reachable is True
 
@@ -232,7 +232,7 @@ class TestConnectivityCheckLogging:
             mock_head.side_effect = mock_head_side_effect
 
             with caplog.at_level(logging.DEBUG):
-                is_reachable, error, legacy_ssl = _do_quick_connectivity_check("192.168.100.1")
+                is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("192.168.100.1")
 
         assert is_reachable is True
 
@@ -270,7 +270,7 @@ class TestConnectivityCheckLogging:
             mock_get.return_value = mock_response
 
             with caplog.at_level(logging.DEBUG):
-                is_reachable, error, legacy_ssl = _do_quick_connectivity_check("http://192.168.100.1")
+                is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("http://192.168.100.1")
 
         assert is_reachable is True
 
@@ -311,7 +311,7 @@ class TestConnectivityCheckLogging:
             mock_get.side_effect = connection_error
 
             with caplog.at_level(logging.DEBUG):
-                is_reachable, error, legacy_ssl = _do_quick_connectivity_check("192.168.100.1")
+                is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("192.168.100.1")
 
         assert is_reachable is False
 
@@ -349,7 +349,7 @@ class TestConnectivityCheckLogging:
             mock_session_class.return_value = mock_legacy_session
 
             with caplog.at_level(logging.DEBUG):
-                is_reachable, error, legacy_ssl = _do_quick_connectivity_check("https://192.168.100.1")
+                is_reachable, error, legacy_ssl, working_url = _do_quick_connectivity_check("https://192.168.100.1")
 
         assert is_reachable is True
         assert legacy_ssl is True
