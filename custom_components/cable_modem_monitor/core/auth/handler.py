@@ -255,24 +255,31 @@ class AuthHandler:
         )
 
         try:
+            # Set Referer header - some modems require this for CSRF protection
+            headers = {"Referer": base_url}
+
             if method == "POST":
-                response = session.post(action_url, data=form_data, timeout=10)
+                response = session.post(action_url, data=form_data, headers=headers, timeout=10)
             else:
-                response = session.get(action_url, params=form_data, timeout=10)
+                response = session.get(action_url, params=form_data, headers=headers, timeout=10)
+
+            # Log cookies and response for debugging
+            cookies_after = dict(session.cookies)
+            _LOGGER.info(
+                "Form submission: HTTP %d, %d bytes, cookies=%s",
+                response.status_code,
+                len(response.text),
+                list(cookies_after.keys()) if cookies_after else "none",
+            )
 
             # Log snippet of form submission response to help debug auth failures
             form_snippet = response.text[:300].replace("\n", " ").replace("\r", "")
-            _LOGGER.info(
-                "Form submission response: HTTP %d, %d bytes. Snippet: %s...",
-                response.status_code,
-                len(response.text),
-                form_snippet,
-            )
+            _LOGGER.debug("Form response snippet: %s...", form_snippet)
 
             # Fetch base URL to check if we're authenticated
             # The form action response (/goform/login) is often a status page, not the data page
             # We need to check the actual data page to see if login succeeded
-            data_response = session.get(base_url, timeout=10)
+            data_response = session.get(base_url, headers=headers, timeout=10)
             _LOGGER.info(
                 "Post-login base URL response: HTTP %d, %d bytes, has_password_field=%s",
                 data_response.status_code,
