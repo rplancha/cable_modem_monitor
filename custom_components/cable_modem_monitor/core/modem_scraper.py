@@ -540,6 +540,18 @@ class ModemScraper:
                 if hnap_builder:
                     self.parser._json_builder = hnap_builder  # type: ignore[attr-defined]
                     _LOGGER.debug("Transferred HNAP builder to parser for authenticated API calls")
+                return success, html
+
+            # Stored strategy failed - try parser hints fallback
+            # This handles cases where discovery found form_plain but parser needs form_base64
+            if not success and self.parser:
+                _LOGGER.info(
+                    "Stored auth strategy %s failed, trying parser hints fallback",
+                    self._auth_handler.strategy.value,
+                )
+                result = self._login_with_parser_hints()
+                if result is not None:
+                    return result
 
             return success, html
 
