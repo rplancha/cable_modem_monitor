@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-01-02
+
+### ✨ Auth Strategy Discovery
+
+v3.12.0 introduces Auth Strategy Discovery, a major architectural improvement that automatically detects and stores authentication requirements during initial setup. This eliminates hard-coded parser-specific authentication logic and improves reliability for modems with firmware variants.
+
+### Added
+
+- **Auth Strategy Discovery** - During config flow, the integration now probes the modem to discover which authentication method works (Basic HTTP, Form-based, HNAP/SOAP, URL Token, or No Auth)
+- **Stored Auth Configuration** - The discovered auth strategy is stored in config entry and reused during polling, ensuring consistent authentication
+- **Parser Hints** - Parsers now provide `hnap_hints`, `js_auth_hints`, and `auth_form_hints` for auth discovery
+- **AuthHandler Improvements** - All authentication is now handled centrally by AuthHandler, not individual parsers
+
+### Changed
+
+- **BREAKING (Internal)**: Parsers no longer implement `login()` method directly. All auth is handled by `AuthHandler`
+- **SB8200 Auth**: URL token authentication now uses session cookies instead of parser-stored tokens
+- **S33/MB8611 HNAP**: HNAP builder is now created by AuthHandler and transferred to parser for data fetches
+
+### Technical Details
+
+Auth strategies supported:
+- `NO_AUTH` - No authentication required
+- `BASIC_HTTP` - HTTP Basic authentication
+- `FORM_PLAIN` - Form POST with plain credentials
+- `FORM_BASE64` - Form POST with base64-encoded credentials
+- `HNAP_SESSION` - HNAP/SOAP challenge-response authentication
+- `URL_TOKEN_SESSION` - URL-based token with session cookies
+
 ## [3.11.0] - 2025-12-27
 
 ### ⚠️ BREAKING CHANGE: Channel Sensor Entity IDs
