@@ -331,35 +331,23 @@ class TestG54FloatParsing:
         assert result == 0.0
 
 
-class TestG54Login:
-    """Test login behavior."""
+class TestG54AuthHints:
+    """Test auth discovery hints (v3.12.0+)."""
 
-    def test_login_success_with_cookie(self):
-        """Test login success when sysauth cookie is set."""
+    def test_has_auth_form_hints(self):
+        """Test parser has auth_form_hints for non-standard LuCI fields."""
+        assert hasattr(ArrisG54Parser, "auth_form_hints")
+        hints = ArrisG54Parser.auth_form_hints
+        assert hints.get("username_field") == "luci_username"
+        assert hints.get("password_field") == "luci_password"
+
+    def test_login_returns_default(self):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
         parser = ArrisG54Parser()
-
         session = MagicMock()
-        session.cookies = {"sysauth": "abc123"}
-        response = MagicMock()
-        response.text = "<html>success</html>"
-        session.post.return_value = response
-
         success, html = parser.login(session, "http://10.0.10.1", "admin", "password")
+        # Base class default returns (True, None)
         assert success is True
-        assert html is not None
-
-    def test_login_failure_no_cookie(self):
-        """Test login failure when no sysauth cookie."""
-        parser = ArrisG54Parser()
-
-        session = MagicMock()
-        session.cookies = {}  # No sysauth cookie
-        response = MagicMock()
-        response.text = "<html>login failed</html>"
-        session.post.return_value = response
-
-        success, html = parser.login(session, "http://10.0.10.1", "admin", "wrong")
-        assert success is False
         assert html is None
 
 

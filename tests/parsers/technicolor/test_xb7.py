@@ -47,49 +47,29 @@ class TestDetection:
 
 
 class TestAuthentication:
-    """Test authentication."""
+    """Test auth discovery hints and default login behavior (v3.12.0+)."""
 
-    def test_login_with_credentials(self):
-        """Test that form-based authentication works."""
-        from unittest.mock import Mock
+    def test_login_returns_default(self):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
+        from unittest.mock import MagicMock
 
         parser = TechnicolorXB7Parser()
-        session = Mock()
-
-        # Mock the POST request to check.jst
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.url = "http://10.0.0.1/at_a_glance.jst"  # Simulates redirect
-        session.post.return_value = mock_response
-
-        # Mock the GET request to network_setup.jst
-        mock_status_response = Mock()
-        mock_status_response.status_code = 200
-        mock_status_response.text = "<html>Status page content</html>"
-        session.get.return_value = mock_status_response
-
+        session = MagicMock()
         success, html = parser.login(session, "http://10.0.0.1", "admin", "password")
-
+        # Base class default returns (True, None)
         assert success is True
-        assert html == "<html>Status page content</html>"
-        session.post.assert_called_once_with(
-            "http://10.0.0.1/check.jst",
-            data={"username": "admin", "password": "password"},
-            timeout=10,
-            allow_redirects=True,
-        )
-        session.get.assert_called_once_with("http://10.0.0.1/network_setup.jst", timeout=10)
+        assert html is None
 
-    def test_login_without_credentials(self):
-        """Test that login fails gracefully without credentials."""
-        from unittest.mock import Mock
+    def test_login_no_session_calls(self):
+        """Test that login() doesn't make any session calls (auth handled by AuthDiscovery)."""
+        from unittest.mock import MagicMock
 
         parser = TechnicolorXB7Parser()
-        session = Mock()
-        success, html = parser.login(session, "http://10.0.0.1", None, None)
-
-        assert success is False
-        assert html is None
+        session = MagicMock()
+        parser.login(session, "http://10.0.0.1", "admin", "password")
+        # Base class default doesn't make any session calls
+        session.post.assert_not_called()
+        session.get.assert_not_called()
 
 
 class TestDownstream:

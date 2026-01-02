@@ -28,7 +28,6 @@ from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import AuthFactory, AuthStrategyType, BasicAuthConfig
 from custom_components.cable_modem_monitor.lib.utils import parse_uptime_to_seconds
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -54,10 +53,8 @@ class NetgearC7000v2Parser(ModemParser):
     docsis_version = "3.0"
     fixtures_path = "tests/parsers/netgear/fixtures/c7000v2"
 
-    # C7000v2 uses HTTP Basic Auth
-    auth_config = BasicAuthConfig(
-        strategy=AuthStrategyType.BASIC_HTTP,
-    )
+    # Auth handled by AuthDiscovery (v3.12.0+) - no auth_config needed
+    # BasicAuth will be auto-detected via 401 response
 
     # Capabilities - C7000v2 provides channel data, version info, uptime, and restart
     capabilities = {
@@ -79,21 +76,7 @@ class NetgearC7000v2Parser(ModemParser):
         {"path": "/RouterStatus.htm", "auth_method": "basic", "auth_required": True},
     ]
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """Perform login using HTTP Basic Auth.
-
-        Args:
-            session: Requests session
-            base_url: Modem base URL
-            username: Username for authentication
-            password: Password for authentication
-
-        Returns:
-            tuple[bool, str | None]: (success, authenticated_html)
-        """
-        # C7000v2 uses HTTP Basic Auth - use AuthFactory to set it up
-        auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
-        return auth_strategy.login(session, base_url, username, password, self.auth_config)
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     def restart(self, session, base_url) -> bool:
         """Restart the modem.

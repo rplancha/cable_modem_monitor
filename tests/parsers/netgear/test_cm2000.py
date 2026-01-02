@@ -117,14 +117,22 @@ class TestCM2000Metadata:
         parser = NetgearCM2000Parser()
         assert parser.verified is True
 
-    def test_auth_config(self):
-        """Test authentication configuration is set correctly."""
-        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType
+    def test_has_auth_form_hints(self):
+        """Test parser has auth_form_hints for non-standard form fields (v3.12.0+)."""
+        hints = NetgearCM2000Parser.auth_form_hints
+        assert hints.get("username_field") == "loginName"
+        assert hints.get("password_field") == "loginPassword"
 
-        assert NetgearCM2000Parser.auth_config.strategy == AuthStrategyType.FORM_PLAIN
-        assert NetgearCM2000Parser.auth_config.login_url == "/goform/Login"
-        assert NetgearCM2000Parser.auth_config.username_field == "loginName"
-        assert NetgearCM2000Parser.auth_config.password_field == "loginPassword"
+    def test_login_returns_default(self):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
+        from unittest.mock import MagicMock
+
+        parser = NetgearCM2000Parser()
+        session = MagicMock()
+        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
+        # Base class default returns (True, None)
+        assert success is True
+        assert html is None
 
 
 class TestCM2000Parsing:
@@ -182,92 +190,6 @@ class TestCM2000Parsing:
         # assert len(downstream) > 0
         # assert all("channel_id" in ch for ch in downstream)
         # assert all("frequency" in ch for ch in downstream)
-
-
-class TestCM2000Login:
-    """Tests for CM2000 login functionality."""
-
-    def test_login_extracts_dynamic_form_id(self, requests_mock, cm2000_index_html):
-        """Test that login extracts the dynamic form ID from login page."""
-        import re
-
-        parser = NetgearCM2000Parser()
-        import requests
-
-        session = requests.Session()
-        session.verify = False
-        base_url = "https://192.168.100.1"
-
-        # Mock the login page with dynamic form ID
-        requests_mock.get(f"{base_url}/", text=cm2000_index_html)
-
-        # Mock the login POST using a regex pattern to match any /goform/Login URL
-        requests_mock.register_uri(
-            "POST",
-            re.compile(r".*/goform/Login.*"),
-            text="<html><body>Logged in</body></html>",
-        )
-
-        # Mock DocsisStatus.htm with channel data to verify success
-        docsis_html = """
-        <html><script>
-        function InitDsTableTagValue() { var tagValueList = '1|1|Locked|QAM256|1|500000000 Hz|5.0|40.0|0|0|'; }
-        function InitUsTableTagValue() { var tagValueList = '1|1|Locked|ATDMA|1|5120 Ksym/sec|20000000 Hz|38.0 dBmV|'; }
-        </script></html>
-        """
-        requests_mock.get(f"{base_url}/DocsisStatus.htm", text=docsis_html)
-
-        success, html = parser.login(session, base_url, "admin", "password123")
-
-        assert success is True
-        # Verify the login POST was made (check request history)
-        assert any("/goform/Login" in str(req.url) for req in requests_mock.request_history if req.method == "POST")
-
-    def test_login_fails_when_redirected_to_login(self, requests_mock, cm2000_index_html):
-        """Test that login fails if DocsisStatus.htm redirects to login page."""
-        import re
-
-        parser = NetgearCM2000Parser()
-        import requests
-
-        session = requests.Session()
-        session.verify = False
-        base_url = "https://192.168.100.1"
-
-        # Mock the login page
-        requests_mock.get(f"{base_url}/", text=cm2000_index_html)
-        requests_mock.register_uri(
-            "POST",
-            re.compile(r".*/goform/Login.*"),
-            text="<html><body>Logged in</body></html>",
-        )
-
-        # Mock DocsisStatus.htm returning login redirect (auth failed)
-        login_redirect_html = """
-        <html><script>
-        function redirect(){top.location.href="/Login.htm";}
-        </script><body onLoad="redirect()"></body></html>
-        """
-        requests_mock.get(f"{base_url}/DocsisStatus.htm", text=login_redirect_html)
-
-        success, html = parser.login(session, base_url, "admin", "wrongpassword")
-
-        assert success is False
-
-    def test_login_skipped_without_credentials(self):
-        """Test that login is skipped when no credentials provided."""
-        parser = NetgearCM2000Parser()
-        import requests
-
-        session = requests.Session()
-        base_url = "https://192.168.100.1"
-
-        # Should return (True, None) when no credentials
-        success, html = parser.login(session, base_url, None, None)
-        assert success is True
-
-        success, html = parser.login(session, base_url, "", "")
-        assert success is True
 
 
 class TestCM2000Fixtures:

@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlparse
 
-import requests
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, RedirectFormAuthConfig
 from custom_components.cable_modem_monitor.lib.utils import extract_float, extract_number
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -32,16 +29,11 @@ class TechnicolorCGA2121Parser(ModemParser):
     docsis_version = "3.0"
     fixtures_path = "tests/parsers/technicolor/fixtures/cga2121"
 
-    # Authentication configuration - form-based POST
-    # HAR analysis: POST /goform/logon -> 302 to /basicUX.html, sets sec= cookie
-    auth_config = RedirectFormAuthConfig(
-        strategy=AuthStrategyType.REDIRECT_FORM,
-        login_url="/goform/logon",
-        username_field="username_login",
-        password_field="password_login",
-        success_redirect_pattern="/basicUX.html",
-        authenticated_page_url="/st_docsis.html",
-    )
+    # Auth handled by AuthDiscovery (v3.12.0+) - hints for non-standard form fields
+    auth_form_hints = {
+        "username_field": "username_login",
+        "password_field": "password_login",
+    }
 
     url_patterns = [
         {"path": "/st_docsis.html", "auth_method": "form", "auth_required": True},
@@ -53,151 +45,7 @@ class TechnicolorCGA2121Parser(ModemParser):
         ModemCapability.UPSTREAM_CHANNELS,
     }
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """
-        CGA2121 uses form-based authentication.
-
-        Returns:
-            tuple: (success: bool, html: str | None) - authenticated HTML from st_docsis.html
-        """
-        if not username or not password:
-            _LOGGER.debug("No credentials provided for CGA2121, attempting without auth")
-            return False, None
-
-        try:
-            return self._perform_login(session, base_url, username, password)
-        except (requests.exceptions.Timeout, requests.exceptions.ReadTimeout) as e:
-            _LOGGER.debug("CGA2121 login timeout (modem may be busy or rebooting): %s", str(e))
-        except requests.exceptions.ConnectionError as e:
-            _LOGGER.warning("CGA2121 login connection error: %s", str(e))
-        except requests.exceptions.RequestException as e:
-            _LOGGER.warning("CGA2121 login request failed: %s", str(e))
-        except Exception as e:
-            _LOGGER.error("CGA2121 login unexpected exception: %s", str(e), exc_info=True)
-        return False, None
-
-    def _perform_login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """Execute the login POST and fetch status page."""
-        login_url = f"{base_url}/goform/logon"
-        login_data = {
-            "username_login": username,
-            "password_login": password,
-            "language_selector": "en",
-        }
-
-        _LOGGER.debug("CGA2121: Posting credentials to %s", login_url)
-        response = session.post(login_url, data=login_data, timeout=10, allow_redirects=True)
-
-        # Log response details for debugging auth issues
-        self._log_auth_response(response, session)
-
-        if not self._validate_login_response(response, base_url):
-            return False, None
-
-        return self._fetch_status_page(session, base_url)
-
-    def _log_auth_response(self, response, session) -> None:
-        """Log detailed auth response info for debugging."""
-        _LOGGER.debug(
-            "CGA2121 auth response: status=%s, final_url=%s, history=%s",
-            response.status_code,
-            response.url,
-            [r.status_code for r in response.history],
-        )
-
-        # Log cookies received - critical for diagnosing session issues
-        cookies = session.cookies.get_dict()
-        if cookies:
-            # Mask cookie values but show names and value length
-            masked = {k: f"<{len(str(v))} chars>" for k, v in cookies.items()}
-            _LOGGER.debug("CGA2121 session cookies: %s", masked)
-        else:
-            _LOGGER.warning("CGA2121: No cookies received after login - session may fail")
-
-        # Check for expected 'sec' cookie
-        if "sec" not in cookies:
-            _LOGGER.warning(
-                "CGA2121: Expected 'sec' cookie not found. Got cookies: %s",
-                list(cookies.keys()),
-            )
-
-    def _validate_login_response(self, response, base_url: str) -> bool:
-        """Validate the login response for security and success."""
-        if response.status_code != 200:
-            _LOGGER.error(
-                "CGA2121 login failed: status=%s, url=%s, response_size=%s",
-                response.status_code,
-                response.url,
-                len(response.text),
-            )
-            return False
-
-        # Security check: Ensure redirect is to same host
-        redirect_parsed = urlparse(response.url)
-        base_parsed = urlparse(base_url)
-        if redirect_parsed.hostname != base_parsed.hostname:
-            _LOGGER.error(
-                "CGA2121: Security violation - redirect to different host: %s",
-                response.url,
-            )
-            return False
-
-        # Check if we're still on login page (wrong credentials)
-        if "logon.html" in response.url.lower():
-            # Log page content snippet to help diagnose login failure reason
-            snippet = response.text[:500] if response.text else "<empty>"
-            _LOGGER.warning(
-                "CGA2121: Login failed - still on login page. " "Check credentials. Response snippet: %s",
-                snippet.replace("\n", " ")[:200],
-            )
-            return False
-
-        # Log successful redirect destination
-        _LOGGER.debug("CGA2121: Login redirected to %s (expected /basicUX.html)", response.url)
-        return True
-
-    def _fetch_status_page(self, session, base_url: str) -> tuple[bool, str | None]:
-        """Fetch the DOCSIS status page with authenticated session."""
-        status_url = f"{base_url}/st_docsis.html"
-        _LOGGER.debug("CGA2121: Fetching %s with authenticated session", status_url)
-        status_response = session.get(status_url, timeout=10)
-
-        if status_response.status_code != 200:
-            _LOGGER.error(
-                "CGA2121: Failed to fetch status page: status=%s, url=%s",
-                status_response.status_code,
-                status_response.url,
-            )
-            return False, None
-
-        # Verify we got the actual status page
-        is_login_redirect = "logon.html" in status_response.url.lower()
-        has_channel_data = "Downstream Channels" in status_response.text
-
-        if is_login_redirect:
-            _LOGGER.warning(
-                "CGA2121: Session expired or invalid - redirected to login. " "URL: %s, Cookies: %s",
-                status_response.url,
-                list(session.cookies.get_dict().keys()),
-            )
-            return False, None
-
-        if not has_channel_data:
-            # Log what we got instead to help diagnose
-            title_match = "DOCSIS Status" in status_response.text
-            page_size = len(status_response.text)
-            _LOGGER.warning(
-                "CGA2121: Got page but no channel data. "
-                "has_title=%s, size=%s, url=%s. "
-                "Page may have different structure or require different auth.",
-                title_match,
-                page_size,
-                status_response.url,
-            )
-            return False, None
-
-        _LOGGER.info("CGA2121: Successfully authenticated (%s bytes)", len(status_response.text))
-        return True, status_response.text
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     @classmethod
     def can_parse(cls, soup: BeautifulSoup, url: str, html: str) -> bool:

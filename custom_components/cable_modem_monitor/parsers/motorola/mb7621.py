@@ -46,14 +46,21 @@ class MotorolaMB7621Parser(ModemParser):
     docsis_version = "3.0"
     fixtures_path = "tests/parsers/motorola/fixtures/mb7621"
 
-    # Authentication configuration
-    # MB7621 requires Base64-encoded passwords (not secure, just encoding)
+    # Auth handled by AuthDiscovery (v3.12.0+) - hints for non-standard form fields
+    # NOTE: MB7621 also requires Base64-encoded passwords. For now, keeping
+    # legacy login() until AuthDiscovery supports password encoding hints.
+    auth_form_hints = {
+        "username_field": "loginUsername",
+        "password_field": "loginPassword",
+    }
+
+    # Legacy auth_config kept for backward compatibility during migration
     auth_config = FormAuthConfig(
         strategy=AuthStrategyType.FORM_PLAIN_AND_BASE64,
         login_url="/goform/login",
         username_field="loginUsername",
         password_field="loginPassword",
-        success_indicator="10000",  # Min response size indicates success
+        success_indicator="10000",
     )
 
     url_patterns = [

@@ -16,8 +16,6 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, FormAuthConfig
-
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,14 +38,11 @@ class ArrisG54Parser(ModemParser):
     docsis_version = "3.1"
     fixtures_path = "tests/parsers/arris/fixtures/g54"
 
-    # Authentication configuration
-    auth_config = FormAuthConfig(
-        strategy=AuthStrategyType.FORM_PLAIN,
-        login_url="/cgi-bin/luci/",
-        username_field="luci_username",
-        password_field="luci_password",
-        success_indicator="sysauth",  # Cookie set on success
-    )
+    # Auth handled by AuthDiscovery (v3.12.0+) - hints for non-standard form fields
+    auth_form_hints = {
+        "username_field": "luci_username",
+        "password_field": "luci_password",
+    }
 
     url_patterns = [
         {"path": "/cgi-bin/luci/", "auth_method": "form", "auth_required": False},
@@ -78,34 +73,7 @@ class ArrisG54Parser(ModemParser):
             and ("G54" in html or "G5X" in html)
         )
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """Log in using LuCI form authentication."""
-        login_url = f"{base_url}/cgi-bin/luci/"
-
-        # POST login credentials
-        data = {
-            "luci_username": username,
-            "luci_password": password,
-        }
-
-        try:
-            response = session.post(login_url, data=data, timeout=30)
-
-            # Check if sysauth cookie was set (indicates success)
-            if "sysauth" in session.cookies:
-                _LOGGER.debug("G54 login successful")
-                return (True, response.text)
-
-            # Check for redirect to admin page (also indicates success)
-            if response.status_code == 200 and "/admin/" in response.url:
-                return (True, response.text)
-
-            _LOGGER.warning("G54 login failed - no sysauth cookie")
-            return (False, None)
-
-        except Exception as e:
-            _LOGGER.error("G54 login error: %s", e)
-            return (False, None)
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the G54 gateway."""

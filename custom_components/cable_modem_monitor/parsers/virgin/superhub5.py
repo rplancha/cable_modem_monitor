@@ -51,8 +51,7 @@ class VirginSuperHub5Parser(ModemParser):
     docsis_version = "3.1"
     fixtures_path = "tests/parsers/virgin/fixtures/superhub5"
 
-    # No authentication required
-    auth_config = None
+    # Auth handled by AuthDiscovery (v3.12.0+) - no auth_config needed
 
     url_patterns = [
         {"path": "/rest/v1/cablemodem/state_", "auth_method": "none", "auth_required": False},
@@ -81,9 +80,7 @@ class VirginSuperHub5Parser(ModemParser):
             return True
         return '"upstream"' in html and '"channels"' in html and '"atdma"' in html
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """No login required - REST API is unauthenticated."""
-        return (True, None)
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the SuperHub 5 REST API."""

@@ -26,28 +26,38 @@ class TestSB8200AuthNoAuthServer:
         assert error is None
 
     def test_login_with_credentials_still_succeeds(self, sb8200_server_noauth):
-        """Test login succeeds on no-auth server even with credentials provided."""
+        """Test login succeeds on no-auth server even with credentials provided.
+
+        Note: With credentials, login() may return HTML content on success (not None).
+        """
         parser = ArrisSB8200Parser()
         session = requests.Session()
 
-        success, error = parser.login(session, sb8200_server_noauth.url, "admin", "password")
+        success, html_or_error = parser.login(session, sb8200_server_noauth.url, "admin", "password")
 
         assert success is True
-        assert error is None
+        # With credentials, returns HTML on success (not error)
+        if html_or_error is not None:
+            assert isinstance(html_or_error, str)
 
 
 class TestSB8200AuthServer:
     """Test SB8200 parser with auth server (Travis's variant)."""
 
     def test_login_with_valid_credentials_succeeds(self, sb8200_server_auth):
-        """Test login succeeds on auth server with valid credentials."""
+        """Test login succeeds on auth server with valid credentials.
+
+        Note: With credentials, login() may return HTML content on success (not None).
+        """
         parser = ArrisSB8200Parser()
         session = requests.Session()
 
-        success, error = parser.login(session, sb8200_server_auth.url, "admin", "password")
+        success, html_or_error = parser.login(session, sb8200_server_auth.url, "admin", "password")
 
         assert success is True
-        assert error is None
+        # With credentials, returns HTML on success (not error)
+        if html_or_error is not None:
+            assert isinstance(html_or_error, str)
 
     def test_login_with_invalid_credentials_fails(self, sb8200_server_auth):
         """Test login fails on auth server with invalid credentials."""
@@ -78,15 +88,20 @@ class TestSB8200AuthHTTPS:
     """Test SB8200 parser with HTTPS + auth (full Travis scenario)."""
 
     def test_login_over_https_with_valid_credentials(self, sb8200_server_auth_https):
-        """Test authentication works over HTTPS with self-signed cert."""
+        """Test authentication works over HTTPS with self-signed cert.
+
+        Note: With credentials, login() may return HTML content on success (not None).
+        """
         parser = ArrisSB8200Parser()
         session = requests.Session()
         session.verify = False  # Allow self-signed cert
 
-        success, error = parser.login(session, sb8200_server_auth_https.url, "admin", "password")
+        success, html_or_error = parser.login(session, sb8200_server_auth_https.url, "admin", "password")
 
         assert success is True
-        assert error is None
+        # With credentials, returns HTML on success (not error)
+        if html_or_error is not None:
+            assert isinstance(html_or_error, str)
 
     def test_login_over_https_with_invalid_credentials(self, sb8200_server_auth_https):
         """Test auth failure over HTTPS."""

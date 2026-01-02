@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import logging
 
-import requests
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, RedirectFormAuthConfig
 from custom_components.cable_modem_monitor.lib.utils import extract_float, extract_number
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -31,15 +29,8 @@ class TechnicolorXB7Parser(ModemParser):
     docsis_version = "3.1"
     fixtures_path = "tests/parsers/technicolor/fixtures/xb7"
 
-    # New authentication configuration (declarative)
-    auth_config = RedirectFormAuthConfig(
-        strategy=AuthStrategyType.REDIRECT_FORM,
-        login_url="/check.jst",
-        username_field="username",
-        password_field="password",
-        success_redirect_pattern="/at_a_glance.jst",
-        authenticated_page_url="/network_setup.jst",
-    )
+    # Auth handled by AuthDiscovery (v3.12.0+)
+    # Standard form fields (username, password) - no hints needed
 
     url_patterns = [
         {"path": "/network_setup.jst", "auth_method": "form", "auth_required": True},
@@ -54,94 +45,7 @@ class TechnicolorXB7Parser(ModemParser):
         ModemCapability.SOFTWARE_VERSION,
     }
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """
-        XB7 uses form-based authentication.
-
-        Login flow:
-        1. POST credentials to /check.jst
-        2. Receives redirect to /at_a_glance.jst
-        3. Can then access /network_setup.jst
-
-        Args:
-            session: requests session object
-            base_url: modem base URL (e.g., http://10.0.0.1)
-            username: admin username
-            password: admin password
-
-        Returns:
-            tuple: (success: bool, html: str) - authenticated HTML from network_setup.jst
-        """
-        if not username or not password:
-            _LOGGER.debug("No credentials provided for XB7, attempting without auth")
-            return False, None
-
-        try:
-            # Step 1: POST credentials to check.jst
-            login_url = f"{base_url}/check.jst"
-            login_data = {
-                "username": username,
-                "password": password,
-            }
-
-            _LOGGER.debug("XB7: Posting credentials to %s", login_url)
-            response = session.post(login_url, data=login_data, timeout=10, allow_redirects=True)
-
-            if response.status_code != 200:
-                _LOGGER.error("XB7 login failed with status %s", response.status_code)
-                return False, None
-
-            # Step 2: Check if we got redirected to at_a_glance.jst (successful login)
-            # Validate redirect URL is on the same host for security
-            from urllib.parse import urlparse
-
-            redirect_parsed = urlparse(response.url)
-            base_parsed = urlparse(base_url)
-
-            # Security check: Ensure redirect is to same host
-            if redirect_parsed.hostname != base_parsed.hostname:
-                _LOGGER.error("XB7: Security violation - redirect to different host: %s", response.url)
-                return False, None
-
-            if "at_a_glance.jst" in response.url:
-                _LOGGER.debug("XB7: Login successful, redirected to at_a_glance.jst")
-            else:
-                _LOGGER.warning("XB7: Unexpected redirect to %s", response.url)
-
-            # Step 3: Now fetch the network_setup.jst page with authenticated session
-            status_url = f"{base_url}/network_setup.jst"
-            _LOGGER.debug("XB7: Fetching %s with authenticated session", status_url)
-            status_response = session.get(status_url, timeout=10)
-
-            if status_response.status_code != 200:
-                _LOGGER.error("XB7: Failed to fetch status page, status %s", status_response.status_code)
-                return False, None
-
-            _LOGGER.info(
-                "XB7: Successfully authenticated and fetched status page (%s bytes)", len(status_response.text)
-            )
-            return True, status_response.text
-
-        except (requests.exceptions.Timeout, requests.exceptions.ReadTimeout) as e:
-            # Timeout is common when modem is busy/rebooting - log at debug level
-            _LOGGER.debug("XB7 login timeout (modem may be busy or rebooting): %s", str(e))
-            return False, None
-
-        except requests.exceptions.ConnectionError as e:
-            # Connection errors should be logged but not with full stack trace
-            _LOGGER.warning("XB7 login connection error: %s", str(e))
-            return False, None
-
-        except requests.exceptions.RequestException as e:
-            # Other request errors
-            _LOGGER.warning("XB7 login request failed: %s", str(e))
-            _LOGGER.debug("XB7 login exception details:", exc_info=True)  # Full trace only at debug
-            return False, None
-
-        except Exception as e:
-            # Unexpected errors should still log details
-            _LOGGER.error("XB7 login unexpected exception: %s", str(e), exc_info=True)
-            return False, None
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     @classmethod
     def can_parse(cls, soup: BeautifulSoup, url: str, html: str) -> bool:

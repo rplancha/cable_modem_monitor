@@ -6,7 +6,6 @@ import logging
 
 from bs4 import BeautifulSoup, Tag
 
-from custom_components.cable_modem_monitor.core.auth import AuthFactory, AuthStrategyType, BasicAuthConfig
 from custom_components.cable_modem_monitor.lib.utils import extract_float, extract_number, parse_uptime_to_seconds
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -34,8 +33,8 @@ class TechnicolorTC4400Parser(ModemParser):
     docsis_version = "3.1"
     fixtures_path = "tests/parsers/technicolor/fixtures/tc4400"
 
-    # New authentication configuration (declarative)
-    auth_config = BasicAuthConfig(strategy=AuthStrategyType.BASIC_HTTP)
+    # Auth handled by AuthDiscovery (v3.12.0+) - no auth_config needed
+    # BasicAuth will be auto-detected via 401 response
 
     url_patterns = [
         {"path": "/cmconnectionstatus.html", "auth_method": "basic", "auth_required": True},
@@ -68,15 +67,7 @@ class TechnicolorTC4400Parser(ModemParser):
 
         return result
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """
-        Log in to the modem using Basic HTTP Authentication.
-
-        Returns:
-            tuple[bool, str | None]: (success, authenticated_html)
-        """
-        auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
-        return auth_strategy.login(session, base_url, username, password, self.auth_config)
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the modem."""

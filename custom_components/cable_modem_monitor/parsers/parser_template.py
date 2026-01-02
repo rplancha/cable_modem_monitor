@@ -19,9 +19,11 @@ STEP-BY-STEP GUIDE:
    - Check for unique page title, CSS classes, or URL patterns
    - Return True if this is your modem, False otherwise
 
-4. IMPLEMENT login()
-   - Set up authentication (basic auth, form auth, HNAP, or none)
-   - Return True if login successful or not needed
+4. CONFIGURE AUTH HINTS (if needed)
+   - For standard auth (no auth, Basic Auth, standard forms): No hints needed
+   - For non-standard form fields: Add auth_form_hints dict
+   - For JavaScript-based auth: Add js_auth_hints dict
+   - Authentication is handled automatically by AuthDiscovery at setup time
 
 5. IMPLEMENT parse() - REQUIRED
    - Main method that returns ALL modem data
@@ -83,7 +85,25 @@ class YourModemParser(ModemParser):
     models = ["MODEL1", "MODEL2"]  # e.g., ["CM1000", "CM1100"]
 
     # =========================================================================
-    # STEP 3: IMPLEMENT MODEM DETECTION
+    # STEP 3: CONFIGURE AUTH HINTS (if non-standard auth)
+    # =========================================================================
+    # For modems with non-standard form field names:
+    # auth_form_hints = {
+    #     "username_field": "yourUsernameField",
+    #     "password_field": "yourPasswordField",
+    # }
+    #
+    # For modems with JavaScript-based auth (e.g., URL token session):
+    # js_auth_hints = {
+    #     "pattern": "url_token_session",
+    #     "login_prefix": "login_",
+    # }
+    #
+    # For standard auth (no auth, HTTP Basic, standard username/password forms):
+    # No hints needed - AuthDiscovery will auto-detect
+
+    # =========================================================================
+    # STEP 4: IMPLEMENT MODEM DETECTION
     # =========================================================================
     @classmethod
     def can_parse(cls, soup: BeautifulSoup, url: str, html: str) -> bool:
@@ -129,40 +149,10 @@ class YourModemParser(ModemParser):
         # Check URL pattern
         return "your_modem_page.html" in url.lower()
 
-    # =========================================================================
-    # STEP 4: IMPLEMENT login() METHOD
-    # =========================================================================
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """Perform authentication if required.
-
-        Args:
-            session: Requests session
-            base_url: Modem base URL (e.g., "http://192.168.100.1")
-            username: Username for authentication
-            password: Password for authentication
-
-        Returns:
-            tuple[bool, str | None]: (success, authenticated_html)
-                - success: True if login succeeded or no login required
-                - authenticated_html: HTML from login response, or None
-
-        Common patterns:
-        - No auth: return (True, None)
-        - HTTP Basic Auth: Use AuthFactory.get_strategy(AuthStrategyType.BASIC_HTTP)
-        - Form auth: Use AuthFactory.get_strategy(AuthStrategyType.FORM)
-        - HNAP: Use AuthFactory.get_strategy(AuthStrategyType.HNAP)
-
-        Example (HTTP Basic Auth):
-            from custom_components.cable_modem_monitor.core.auth import AuthFactory
-            auth_strategy = AuthFactory.get_strategy(self.auth_config.strategy)
-            return auth_strategy.login(session, base_url, username, password, self.auth_config)
-
-        Example (No auth):
-            return (True, None)  # No authentication needed
-        """
-        # TODO: Implement your login logic
-        # For no authentication:
-        return (True, None)
+    # NOTE: login() method is NOT needed for most parsers
+    # Authentication is handled by AuthDiscovery at setup time.
+    # Only implement login() if your modem requires special auth handling
+    # that can't be expressed via auth_form_hints or js_auth_hints.
 
     # =========================================================================
     # STEP 5: IMPLEMENT parse() METHOD - REQUIRED

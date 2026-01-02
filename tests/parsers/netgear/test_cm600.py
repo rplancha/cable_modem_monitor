@@ -363,17 +363,7 @@ def test_parsing_upstream(cm600_docsis_status_html):
 
 
 class TestAuthentication:
-    """Test HTTP Basic Authentication for CM600."""
-
-    def test_has_basic_auth_config(self):
-        """Test that parser has HTTP Basic Auth configuration."""
-        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, BasicAuthConfig
-
-        parser = NetgearCM600Parser()
-
-        assert parser.auth_config is not None
-        assert isinstance(parser.auth_config, BasicAuthConfig)
-        assert parser.auth_config.strategy == AuthStrategyType.BASIC_HTTP
+    """Test auth discovery hints and URL patterns for CM600 (v3.12.0+)."""
 
     def test_url_patterns_auth_required(self):
         """Test that protected URLs require authentication."""
@@ -396,44 +386,16 @@ class TestAuthentication:
         index_pattern = next(p for p in parser.url_patterns if p["path"] == "/")
         assert index_pattern["auth_required"] is False
 
-    def test_login_configures_basic_auth(self):
-        """Test that login() properly configures HTTP Basic Auth."""
-        from unittest.mock import Mock, patch
+    def test_login_returns_default(self):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
+        from unittest.mock import MagicMock
 
         parser = NetgearCM600Parser()
-        mock_session = Mock()
-        base_url = "http://192.168.100.1"
-
-        # Mock AuthFactory where it's imported, not where it's defined
-        auth_path = "custom_components.cable_modem_monitor.parsers.netgear.cm600.AuthFactory"
-        with patch(auth_path) as mock_factory:
-            mock_strategy = Mock()
-            mock_strategy.login.return_value = (True, None)
-            mock_factory.get_strategy.return_value = mock_strategy
-
-            success, html = parser.login(mock_session, base_url, "admin", "password")
-
-            assert success is True
-            mock_strategy.login.assert_called_once_with(mock_session, base_url, "admin", "password", parser.auth_config)
-
-    def test_login_without_credentials(self):
-        """Test login behavior when no credentials provided."""
-        from unittest.mock import Mock, patch
-
-        parser = NetgearCM600Parser()
-        mock_session = Mock()
-        base_url = "http://192.168.100.1"
-
-        # Mock AuthFactory - Basic Auth should skip when no credentials
-        auth_path = "custom_components.cable_modem_monitor.core.auth.AuthFactory"
-        with patch(auth_path) as mock_factory:
-            mock_strategy = Mock()
-            mock_strategy.login.return_value = (True, None)  # Skip login, return success
-            mock_factory.get_strategy.return_value = mock_strategy
-
-            success, html = parser.login(mock_session, base_url, None, None)
-
-            assert success is True
+        session = MagicMock()
+        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
+        # Base class default returns (True, None)
+        assert success is True
+        assert html is None
 
 
 class TestEdgeCases:

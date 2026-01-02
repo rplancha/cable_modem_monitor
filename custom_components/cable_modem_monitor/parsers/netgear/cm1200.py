@@ -30,8 +30,6 @@ import re
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import BasicAuthConfig
-
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,8 +52,8 @@ class NetgearCM1200Parser(ModemParser):
     docsis_version = "3.1"
     fixtures_path = "tests/parsers/netgear/fixtures/cm1200"
 
-    # CM1200 uses HTTP Basic authentication
-    auth_config = BasicAuthConfig()
+    # Auth handled by AuthDiscovery (v3.12.0+) - no auth_config needed
+    # BasicAuth will be auto-detected via 401 response
 
     # Capabilities - CM1200 provides channel data and system info
     capabilities = {
@@ -74,49 +72,7 @@ class NetgearCM1200Parser(ModemParser):
         {"path": "/DocsisStatus.htm", "auth_method": "basic", "auth_required": True},
     ]
 
-    def login(self, session, base_url: str, username: str, password: str) -> tuple[bool, str | None]:
-        """Perform HTTP Basic authentication.
-
-        HTTP Basic auth is handled by requests via the session.auth attribute.
-        This method sets up the credentials and verifies login success.
-
-        Args:
-            session: Requests session
-            base_url: Modem base URL
-            username: Username for authentication
-            password: Password for authentication
-
-        Returns:
-            tuple[bool, str | None]: (success, authenticated_html)
-        """
-        if not username or not password:
-            _LOGGER.debug("CM1200: No credentials provided, skipping login")
-            return (True, None)
-
-        try:
-            # Set HTTP Basic auth credentials on the session
-            session.auth = (username, password)
-
-            # Verify by fetching DocsisStatus.htm
-            _LOGGER.debug("CM1200: Testing HTTP Basic auth via DocsisStatus.htm")
-            response = session.get(f"{base_url}/DocsisStatus.htm", timeout=10)
-
-            if response.status_code == 401:
-                _LOGGER.warning("CM1200: HTTP Basic auth failed (401 Unauthorized)")
-                return (False, None)
-
-            if response.status_code == 200 and (
-                "InitDsTableTagValue" in response.text or "InitUsTableTagValue" in response.text
-            ):
-                _LOGGER.info("CM1200: HTTP Basic auth successful")
-                return (True, response.text)
-
-            _LOGGER.warning("CM1200: Unexpected response status %d", response.status_code)
-            return (False, None)
-
-        except Exception as e:
-            _LOGGER.error("CM1200: Login exception: %s", e, exc_info=True)
-            return (False, None)
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the modem.

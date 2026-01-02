@@ -6,7 +6,6 @@ import os
 from unittest.mock import Mock
 
 import pytest
-import requests
 from bs4 import BeautifulSoup
 
 from custom_components.cable_modem_monitor.parsers.technicolor.cga2121 import (
@@ -148,124 +147,21 @@ class TestParsing:
         assert data["system_info"] == {}
 
 
-class TestLogin:
-    """Test login functionality."""
+class TestAuthHints:
+    """Test auth discovery hints (v3.12.0+)."""
 
-    def test_login_no_credentials_returns_false(self, parser):
-        """Test login without credentials returns False."""
+    def test_has_auth_form_hints(self, parser):
+        """Test parser has auth_form_hints for non-standard form fields."""
+        hints = TechnicolorCGA2121Parser.auth_form_hints
+        assert hints.get("username_field") == "username_login"
+        assert hints.get("password_field") == "password_login"
+
+    def test_login_returns_default(self, parser):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
         session = Mock()
-        success, html = parser.login(session, "http://192.168.100.1", None, None)
-        assert success is False
-        assert html is None
-
-    def test_login_empty_credentials_returns_false(self, parser):
-        """Test login with empty credentials returns False."""
-        session = Mock()
-        success, html = parser.login(session, "http://192.168.100.1", "", "")
-        assert success is False
-        assert html is None
-
-    def test_login_success(self, parser, st_docsis_html):
-        """Test successful login flow."""
-        session = Mock()
-
-        # Mock the POST response (login)
-        login_response = Mock()
-        login_response.status_code = 200
-        login_response.url = "http://192.168.100.1/basicUX.html"
-        login_response.history = [Mock(status_code=302)]  # Simulate redirect
-
-        # Mock the GET response (status page)
-        status_response = Mock()
-        status_response.status_code = 200
-        status_response.text = st_docsis_html
-        status_response.url = "http://192.168.100.1/st_docsis.html"
-
-        # Mock session cookies (CGA2121 uses 'sec' cookie)
-        session.cookies.get_dict.return_value = {"sec": "1486188572"}
-        session.post.return_value = login_response
-        session.get.return_value = status_response
-
         success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
-
+        # Base class default returns (True, None)
         assert success is True
-        assert html == st_docsis_html
-        session.post.assert_called_once()
-        session.get.assert_called_once()
-
-    def test_login_redirects_to_login_page(self, parser):
-        """Test login failure when redirected back to login page."""
-        session = Mock()
-
-        # Mock redirect back to login page (wrong credentials)
-        login_response = Mock()
-        login_response.status_code = 200
-        login_response.url = "http://192.168.100.1/logon.html"
-        login_response.text = "<html>Login failed</html>"
-        login_response.history = []
-
-        session.cookies.get_dict.return_value = {}
-        session.post.return_value = login_response
-
-        success, html = parser.login(session, "http://192.168.100.1", "admin", "wrong")
-
-        assert success is False
-        assert html is None
-
-    def test_login_post_fails(self, parser):
-        """Test login when POST request fails."""
-        session = Mock()
-
-        login_response = Mock()
-        login_response.status_code = 401
-        login_response.url = "http://192.168.100.1/goform/logon"
-        login_response.text = "Unauthorized"
-        login_response.history = []
-
-        session.cookies.get_dict.return_value = {}
-        session.post.return_value = login_response
-
-        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
-
-        assert success is False
-        assert html is None
-
-    def test_login_timeout(self, parser):
-        """Test login timeout handling."""
-        session = Mock()
-        session.post.side_effect = requests.exceptions.Timeout("Connection timed out")
-
-        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
-
-        assert success is False
-        assert html is None
-
-    def test_login_connection_error(self, parser):
-        """Test login connection error handling."""
-        session = Mock()
-        session.post.side_effect = requests.exceptions.ConnectionError("Connection refused")
-
-        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
-
-        assert success is False
-        assert html is None
-
-    def test_login_security_redirect_check(self, parser):
-        """Test that redirect to different host is rejected."""
-        session = Mock()
-
-        # Mock redirect to different host (security violation)
-        login_response = Mock()
-        login_response.status_code = 200
-        login_response.url = "http://malicious.com/steal"
-        login_response.history = [Mock(status_code=302)]
-
-        session.cookies.get_dict.return_value = {"sec": "fake"}
-        session.post.return_value = login_response
-
-        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
-
-        assert success is False
         assert html is None
 
 

@@ -54,9 +54,16 @@ class ArrisSB8200Parser(ModemParser):
     # Priority - model-specific parser
     priority = 100
 
-    # Authentication configuration
-    # HTTP variant: No auth required (handled by checking credentials)
-    # HTTPS variant: URL token session with sessionId cookie
+    # Auth handled by AuthDiscovery (v3.12.0+) - hints for JS-based URL token auth
+    # NOTE: SB8200 manages session tokens used in data fetching.
+    # Keeping legacy login() until scraper handles token storage.
+    js_auth_hints = {
+        "pattern": "url_token_session",
+        "login_prefix": "login_",
+        "token_prefix": "ct_",
+    }
+
+    # Legacy auth_config kept for backward compatibility during migration
     auth_config = UrlTokenSessionConfig(
         strategy=AuthStrategyType.URL_TOKEN_SESSION,
         login_page="/cmconnectionstatus.html",

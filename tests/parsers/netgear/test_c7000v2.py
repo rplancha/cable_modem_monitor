@@ -183,17 +183,7 @@ class TestParsing:
 
 
 class TestAuthentication:
-    """Test HTTP Basic Authentication for C7000v2."""
-
-    def test_has_basic_auth_config(self):
-        """Test that parser has HTTP Basic Auth configuration."""
-        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, BasicAuthConfig
-
-        parser = NetgearC7000v2Parser()
-
-        assert parser.auth_config is not None
-        assert isinstance(parser.auth_config, BasicAuthConfig)
-        assert parser.auth_config.strategy == AuthStrategyType.BASIC_HTTP
+    """Test auth discovery hints and URL patterns for C7000v2 (v3.12.0+)."""
 
     def test_url_patterns_auth_required(self):
         """Test that protected URLs require authentication."""
@@ -206,6 +196,17 @@ class TestAuthentication:
         # Index page should NOT require auth
         index_pattern = next(p for p in parser.url_patterns if p["path"] == "/")
         assert index_pattern["auth_required"] is False
+
+    def test_login_returns_default(self):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
+        from unittest.mock import MagicMock
+
+        parser = NetgearC7000v2Parser()
+        session = MagicMock()
+        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
+        # Base class default returns (True, None)
+        assert success is True
+        assert html is None
 
 
 class TestMetadata:

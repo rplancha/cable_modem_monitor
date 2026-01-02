@@ -98,11 +98,16 @@ class TestCM1200Metadata:
         parser = NetgearCM1200Parser()
         assert parser.verified is True
 
-    def test_auth_config(self):
-        """Test authentication configuration is set correctly."""
-        from custom_components.cable_modem_monitor.core.auth import AuthStrategyType
+    def test_login_returns_default(self):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
+        from unittest.mock import MagicMock
 
-        assert NetgearCM1200Parser.auth_config.strategy == AuthStrategyType.BASIC_HTTP
+        parser = NetgearCM1200Parser()
+        session = MagicMock()
+        success, html = parser.login(session, "http://192.168.100.1", "admin", "password")
+        # Base class default returns (True, None)
+        assert success is True
+        assert html is None
 
 
 class TestCM1200Parsing:
@@ -234,111 +239,6 @@ class TestCM1200Fixtures:
         """Verify metadata.yaml is present in fixtures directory."""
         metadata_path = os.path.join(os.path.dirname(__file__), "fixtures", "cm1200", "metadata.yaml")
         assert os.path.exists(metadata_path), "metadata.yaml should exist"
-
-
-class TestCM1200Login:
-    """Tests for CM1200 login/authentication."""
-
-    def test_login_no_credentials_returns_success(self):
-        """Test login returns success when no credentials provided."""
-        parser = NetgearCM1200Parser()
-
-        # Mock session (not used when no credentials)
-        class MockSession:
-            pass
-
-        result = parser.login(MockSession(), "http://192.168.100.1", "", "")
-        assert result == (True, None)
-
-    def test_login_no_username_returns_success(self):
-        """Test login returns success when username is empty."""
-        parser = NetgearCM1200Parser()
-
-        class MockSession:
-            pass
-
-        result = parser.login(MockSession(), "http://192.168.100.1", "", "password")
-        assert result == (True, None)
-
-    def test_login_no_password_returns_success(self):
-        """Test login returns success when password is empty."""
-        parser = NetgearCM1200Parser()
-
-        class MockSession:
-            pass
-
-        result = parser.login(MockSession(), "http://192.168.100.1", "admin", "")
-        assert result == (True, None)
-
-    def test_login_success_with_channel_data(self, cm1200_docsis_status_html):
-        """Test successful login when channel data is returned."""
-        parser = NetgearCM1200Parser()
-
-        class MockResponse:
-            status_code = 200
-            text = cm1200_docsis_status_html
-
-        class MockSession:
-            auth = None
-
-            def get(self, url, timeout=None):
-                return MockResponse()
-
-        session = MockSession()
-        result = parser.login(session, "http://192.168.100.1", "admin", "password")
-
-        assert result[0] is True
-        assert result[1] == cm1200_docsis_status_html
-        assert session.auth == ("admin", "password")
-
-    def test_login_401_unauthorized(self):
-        """Test login fails on 401 response."""
-        parser = NetgearCM1200Parser()
-
-        class MockResponse:
-            status_code = 401
-            text = "Unauthorized"
-
-        class MockSession:
-            auth = None
-
-            def get(self, url, timeout=None):
-                return MockResponse()
-
-        session = MockSession()
-        result = parser.login(session, "http://192.168.100.1", "admin", "wrongpassword")
-
-        assert result == (False, None)
-
-    def test_login_unexpected_status_code(self):
-        """Test login fails on unexpected status code."""
-        parser = NetgearCM1200Parser()
-
-        class MockResponse:
-            status_code = 500
-            text = "Internal Server Error"
-
-        class MockSession:
-            auth = None
-
-            def get(self, url, timeout=None):
-                return MockResponse()
-
-        result = parser.login(MockSession(), "http://192.168.100.1", "admin", "password")
-        assert result == (False, None)
-
-    def test_login_exception_handling(self):
-        """Test login handles exceptions gracefully."""
-        parser = NetgearCM1200Parser()
-
-        class MockSession:
-            auth = None
-
-            def get(self, url, timeout=None):
-                raise ConnectionError("Network unreachable")
-
-        result = parser.login(MockSession(), "http://192.168.100.1", "admin", "password")
-        assert result == (False, None)
 
 
 class TestCM1200BootTimeCalculation:

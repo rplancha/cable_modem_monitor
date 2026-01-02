@@ -7,7 +7,6 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from custom_components.cable_modem_monitor.core.auth import AuthStrategyType, NoAuthConfig
 from custom_components.cable_modem_monitor.lib.utils import extract_float, extract_number
 
 from ..base_parser import ModemCapability, ModemParser, ParserStatus
@@ -33,7 +32,7 @@ class ArrisCM820BParser(ModemParser):
 
     priority = 100
 
-    auth_config = NoAuthConfig(strategy=AuthStrategyType.NO_AUTH)
+    # Auth handled by AuthDiscovery (v3.12.0+) - no auth_config needed
 
     url_patterns = [
         {"path": "/cgi-bin/vers_cgi", "auth_method": "none", "auth_required": False},
@@ -45,9 +44,7 @@ class ArrisCM820BParser(ModemParser):
         ModemCapability.SYSTEM_UPTIME,
     }
 
-    def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
-        """ARRIS CM820B does not require authentication."""
-        return (True, None)
+    # login() not needed - uses base class default (AuthDiscovery handles auth)
 
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
         """Parse all data from the modem."""

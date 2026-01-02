@@ -100,37 +100,17 @@ class TestParsing:
 
 
 class TestAuthentication:
-    """Test authentication."""
+    """Test auth discovery hints and default login behavior (v3.12.0+)."""
 
-    def test_login_with_credentials(self):
-        """Test that parser properly sets Basic HTTP Authentication with credentials."""
+    def test_login_returns_default(self):
+        """Test login() uses base class default (auth handled by AuthDiscovery)."""
         parser = TechnicolorTC4400Parser()
         session = Mock()
 
-        # Test with credentials - should set session.auth
+        # Base class default returns (True, None) - no session.auth is set
         success, html = parser.login(session, "http://192.168.0.1", "admin", "password")
-
         assert success is True
-        assert session.auth == ("admin", "password")
-
-    def test_login_without_credentials(self):
-        """Test that parser handles missing credentials gracefully."""
-        parser = TechnicolorTC4400Parser()
-        session = Mock()
-
-        # Test without username
-        success, html = parser.login(session, "http://192.168.0.1", "", "password")
-        assert success is True
-
-        # Test without password
-        session2 = Mock()
-        success, html = parser.login(session2, "http://192.168.0.1", "admin", "")
-        assert success is True
-
-        # Test without both
-        session3 = Mock()
-        success, html = parser.login(session3, "http://192.168.0.1", "", "")
-        assert success is True
+        assert html is None
 
     def test_login_signature(self):
         """Test that login method accepts all required parameters including base_url.

@@ -158,9 +158,20 @@ class ModemParser(ABC):
     # Legacy field for backward compatibility (deprecated - use url_patterns)
     auth_type: str = "form"
 
-    # Authentication configuration (new system - optional, for backward compatibility)
-    # Parsers should define this as a class attribute
+    # Authentication configuration (legacy - deprecated in v3.12.0)
+    # Auth is now handled by AuthDiscovery system, not parsers
+    # This field is kept for backward compatibility with HNAP parsers
+    # that need endpoint/namespace config for data fetching
     auth_config: AuthConfig | None = None
+
+    # Auth discovery hints (v3.12.0+) - for parsers with non-standard auth
+    # These are used by AuthDiscovery to find form fields
+    # Most parsers don't need these - generic detection handles 90% of cases
+    auth_form_hints: dict[str, str] = {}  # e.g., {"username_field": "webUserName"}
+
+    # JavaScript auth hints (v3.12.0+) - for parsers with JS-based auth (e.g., SB8200)
+    # Used by AuthDiscovery when it detects a JavaScript form
+    js_auth_hints: dict[str, str] | None = None  # e.g., {"pattern": "url_token_session"}
 
     # Capabilities declaration - what data this parser can provide
     # Override in subclasses to declare supported capabilities
@@ -276,25 +287,25 @@ class ModemParser(ABC):
         """
         raise NotImplementedError
 
-    @abstractmethod
     def login(self, session, base_url, username, password) -> tuple[bool, str | None]:
         """
         Log in to the modem.
+
+        NOTE (v3.12.0+): This method is DEPRECATED. Authentication is now handled
+        by the AuthDiscovery system during setup. Parsers should NOT implement
+        this method unless they have special requirements (e.g., HNAP parsers
+        that need to manage authentication state for data fetching).
+
+        The default implementation returns (True, None) indicating no auth needed.
+        AuthDiscovery will detect the actual auth requirements during setup.
 
         Returns:
             tuple[bool, str | None]: (success, authenticated_html)
                 - success: True if login succeeded or no login required
                 - authenticated_html: HTML content from login response, or None if not applicable
-
-        Example implementations:
-            # No auth required:
-            return (True, None)
-
-            # Form auth that returns HTML:
-            response = session.post(url, data=credentials)
-            return (response.ok, response.text if response.ok else None)
         """
-        raise NotImplementedError
+        # Default: no auth required (AuthDiscovery handles actual auth during setup)
+        return (True, None)
 
     @abstractmethod
     def parse(self, soup: BeautifulSoup, session=None, base_url=None) -> dict:
